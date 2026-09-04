@@ -6,19 +6,7 @@
 
 | Field | Value |
 |-------|-------|
-| Coverage target | 90% |
-
----
-
-## Entry Criteria
-
-| ID | Criterion | Target |
-|----|-----------|--------|
-| ENT-1 | Test basis (approved Brainstorm artifact) reviewed and available | 100% sections reviewed |
-| ENT-2 | Sandbox payment gateway credentials and test card set provisioned | Available before test execution start |
-| ENT-3 | Server-side vs. client-trusted promo validation confirmed (see Blockers) | Confirmed — currently TBD |
-
-_Note: ENT-2 and ENT-3 are currently unresolved (see Blockers / Dependencies). Execution of tamper and idempotency scenarios cannot start until they are closed._
+| Coverage target | TBD — not specified in tester context; required before exit criteria can be finalized |
 
 ---
 
@@ -26,11 +14,11 @@ _Note: ENT-2 and ENT-3 are currently unresolved (see Blockers / Dependencies). E
 
 | ID | Risk | Impact Area | Likelihood | Impact | Mitigation |
 |----|------|-------------|-----------|--------|-----------|
-| R-01 | Amount sent to payment gateway does not match cart total minus discount (miscalculation or client-side tampering after promo application) | Functional suitability / Security | 4 | 5 | Add scenario asserting server recalculates and validates final amount independent of client payload before gateway call; include a tampered-amount negative test |
-| R-02 | Item goes out of stock between authorization and capture, resulting in "paid but unfulfilled" order state | Reliability | 4 | 5 | Add scenario forcing stock depletion between authorization and capture; assert system either blocks capture or triggers automatic reversal, and order status reflects the outcome |
-| R-03 | Duplicate debit occurs when payment is retried after a gateway timeout or webhook delay | Reliability | 3 | 5 | Add scenario simulating retry with same idempotency key after timeout; assert only one capture is recorded and duplicate is rejected/deduplicated |
-| R-04 | Promo code field accepts injection or malformed input (SQL/script patterns, oversized strings) that bypasses validation | Security | 3 | 4 | Add negative test cases submitting injection patterns and oversized promo strings; assert rejection with generic error and no backend error leakage |
-| R-05 | CVV/card data appears in application logs, URLs, or error responses during checkout failure paths | Security | 2 | 5 | Add scenario triggering a payment failure/error path; assert log and response inspection shows no raw CVV/card PAN (only masked first6/last4) |
+| R-01 | Charged/authorized amount does not match cart total after promo code discount is applied | Functional suitability | 4 | 5 | Add scenarios asserting authorization amount equals (cart subtotal − promo discount) for valid, expired, and stacked promo inputs before capture |
+| R-02 | Order is confirmed / payment captured despite item going out of stock between cart and capture (state mismatch) | Reliability | 4 | 5 | Add scenario forcing stock depletion between authorization and capture; assert capture is blocked and order status reflects "unavailable," not "confirmed" |
+| R-03 | Duplicate debit occurs when customer retries payment after a timeout or network failure | Reliability | 3 | 5 | Add scenario simulating timeout mid-authorization then retry; assert idempotency key prevents a second charge and only one authorization record exists |
+| R-04 | CVV/card data or full PAN appears in logs, URLs, or error/exception messages during checkout | Security | 3 | 5 | Add negative scenarios triggering payment errors (declined, invalid CVV, network drop) and inspect logs/UI/network responses for masked-only data (first6/last4), zero raw CVV |
+| R-05 | Promo code field accepts injection patterns or stacking of expired/invalid codes, altering the authorized amount | Security | 3 | 4 | Add scenarios submitting SQL/script injection patterns and expired/duplicate promo codes; assert rejection and no change to authorized amount |
 
 ---
 
@@ -38,17 +26,16 @@ _Note: ENT-2 and ENT-3 are currently unresolved (see Blockers / Dependencies). E
 
 | Test Type | Scope | Approach | Tooling | Owner | Story Points |
 |-----------|-------|----------|---------|-------|-------------|
-| Functional | Card payment authorization/capture, promo code application, stock validation — individually and per expected checkout logic | Scenario-based verification against test basis; positive and negative cases per condition | Manual + API test client against sandbox gateway | — | TBD |
-| Regression | Known checkout defect patterns: duplicate debit on retry, order confirmed despite failed payment, amount mismatch after discount | Re-run prior regression scenarios plus new cases from R-01–R-05 against current build (pesticide-paradox refresh) | API/UI regression suite (sandbox environment) | — | TBD |
-| Integration | Interaction seam between promo engine → stock/inventory service → payment gateway (discount recalculation → amount → capture call) | End-to-end sequencing tests across the three services, including race-condition and timing scenarios | API test client + sandbox gateway/webhook simulator | — | TBD |
-| Security | Input validation on promo/payment forms; data exposure in logs/responses; amount-tampering checks | Negative/injection test design per regulated-industry mandate; log/response inspection | Manual + API test client (sandbox data only, no real card data) | — | TBD |
+| Functional | Card payment authorization/capture, promo code application, stock validation at point of purchase, and their combined interaction | Risk-based scenario design per condition (success/fail/edge) plus combined-condition scenarios (promo + payment, stock + payment) per Top 3 Focus Areas from brainstorm | Manual execution + API client for checkout endpoints; sandbox bank/card credentials (blocker — see below) | — | TBD |
+| Regression | Known defect patterns: duplicate debit on retry, order-confirmed-despite-unavailable-stock, cart-vs-charged amount mismatch | Re-execute targeted regression subset each cycle to guard against pesticide paradox; refresh assertions when checkout logic changes | TBD — automation framework not specified in tester context | — | TBD |
+| Integration | State consistency across payment gateway, promo engine, and inventory service (amount, stock count, order status) | Verify state handoff at each integration point: promo recalculation occurs before authorization; stock is re-checked before capture; order status reflects gateway response | API testing tool (e.g., Postman/REST client) against sandbox environment | — | TBD |
 
 **Rationale for test type selection:**
-- **Functional** is required because the test basis explicitly names card payment, promo code, and stock validation as behaviors to verify — this is core functional suitability coverage.
-- **Regression** is required because the test basis is named "Checkout payment regression" and prior known defect patterns (duplicate debit, state mismatch) must be re-verified rather than assumed fixed.
-- **Integration** is prioritized because the brainstorm identifies the promo→stock→payment seam as the highest-risk interaction (sequencing/timing), not any single component in isolation.
-- **Security** is mandatory under the regulated-industry standard — zero security scenarios would fail the quality gate, and the test basis itself flags injection and data-exposure surfaces on promo/payment forms.
-- **Performance** is excluded — out of discipline scope; concurrency risk on stock validation is logged as R-02 (reliability), not load-tested.
+- **Functional** — required because the test basis explicitly names three interacting conditions; each and their combination need functional-suitability verification (ISTQB: trace every test to a basis item).
+- **Regression** — checkout is a documented defect-clustering area (duplicate debits, state mismatch); omitting regression risks re-introducing previously fixed defects.
+- **Integration** — the primary risk is not any single component but inconsistent state exchange between payment, promo, and inventory services; integration-level tests target that risk directly.
+- **Performance** — out of discipline scope; the race-condition risk under concurrent buyers is recorded in the Risk Register, not tested this cycle.
+- **Security** — regulated-industry mandate; zero security scenarios would fail the quality gate, and PCI/injection risks (R-04, R-05) are plausible attack surfaces at checkout.
 
 ---
 
@@ -56,32 +43,31 @@ _Note: ENT-2 and ENT-3 are currently unresolved (see Blockers / Dependencies). E
 
 | ID | Criterion | Measurable | Target |
 |----|-----------|-----------|--------|
-| EC-1 | Scenario pass rate on critical path (payment amount integrity, stock-payment sequencing, duplicate-debit prevention) | Yes | >= 95% |
+| EC-1 | Scenario pass rate on the critical path (card payment authorization → capture → order status) | Yes | ≥ 95% |
 | EC-2 | Open Critical or High severity defects at sign-off | Yes | 0 |
-| EC-3 | Security scenarios executed covering R-04 and R-05 (injection input, CVV/log exposure) | Yes | 100% of planned security scenarios executed |
-| EC-4 | Overall scenario coverage against test basis conditions | Yes | >= 90% |
-| EC-5 | Open blockers (sandbox credentials, promo validation model, stock-depletion behavior) resolved before sign-off | No — resolution requires stakeholder confirmation, not a run-result check | Resolved (owner/date TBD) |
+| EC-3 | Security scenarios executed covering R-04 (PCI data exposure) and R-05 (promo injection) | Yes | 100% of identified security scenarios executed |
+| EC-4 | Overall checkout coverage target | Yes | TBD — pending coverage target confirmation |
 
 ---
 
 ## Blockers / Dependencies
 
-- Confirm whether promo code validation is server-side authoritative or client-trusted (affects tamper-test design) — Owner: TBD, Needed by: TBD
-- Confirm test/sandbox payment gateway credentials and sandbox card set availability — Owner: TBD, Needed by: TBD
-- Clarify expected system behavior when stock depletes after payment authorization but before capture — Owner: TBD, Needed by: TBD
+- Confirm whether stock validation occurs at add-to-cart, at payment initiation, or at capture (sequence not specified in test basis) — owner TBD
+- Confirm promo code business rules (stacking allowed? expiry enforcement point?) — not specified — owner TBD
+- Confirm test environment provides sandbox card/bank credentials (no real card data permitted in test artifacts) — owner TBD
 
 ---
 
 ## Not in Scope
 
-- Performance/load/stress testing of checkout under high concurrent traffic (logged as a performance efficiency risk in Brainstorm, not tested this cycle)
-- Unit-level testing of promo discount calculation logic (developer-owned, out of software-testing artifact scope)
-- BNPL, wallet top-up, and net banking payment methods (test basis names card payment only)
-- Refund/chargeback lifecycle (not part of this checkout point-of-purchase basis)
-- Multi-currency conversion display (not mentioned in test basis; TBD if in scope)
+- Performance/load/stress testing of checkout under concurrent traffic (efficiency risk noted in Risk Register, not tested this cycle)
+- BNPL, wallet top-up, and net banking payment methods (not part of supplied test basis)
+- Refund/chargeback lifecycle (checkout only, per test basis)
+- Cross-currency/multi-bank settlement cycle behavior (not mentioned in test basis)
+- Native mobile app checkout (web/API scope confirmed; mobile-specific behavior TBD)
 
 ---
 
 _Generated by TestFlowAssistant — Stage: Test Plan_
 
-*This artifact is a draft for tester review. It requires human approval before it is considered final.*
+*This draft requires tester review and sign-off before use; coverage target and story points remain TBD pending confirmation.*
