@@ -1,60 +1,56 @@
 # Test Report
 
+_Draft artifact — for tester review. Not approved or signed off (a human tester makes the release decision)._
+
 ---
 
 ## Executive Summary
 
-No test execution log or run evidence was supplied for this cycle — the Automate artifact contains draft Playwright specs (`test.skip`/`test.fixme` guards for unconfigured sandbox data), but no CI run output or pass/fail results were provided against them. Consequently pass rate, defect count, and per-area results below reflect **zero executed test cases**, not a defect-free system (ISTQB: absence of evidence is not evidence of absence). Three of nine designed test cases (TC-002, TC-003, TC-004) remain non-executable `fixme` placeholders pending sandbox promo-rate data. Risk status is Red: the plan's own entry criteria (sandbox availability, order-of-operations documentation) are still open blockers, meaning test design/execution should not be considered validated this cycle.
+No test execution log, run artifact, or result data was supplied this session — only design and automation artifacts (Brainstorm, Plan, Scenarios, Cases, Automate). As a result, pass rate, defect counts, and quality-gate evidence cannot be measured and are reported as **unknown/not measured** rather than assumed passing. The automation suite (11 test cases, 2 spec files) is drafted but has never been run — three of its cases (TC‑009/010/011) will self‑skip until `PROMO_MIN_CART_VALUE` is configured, and selectors/order‑status literals remain unconfirmed against the real application. Risk status is Red pending an actual execution cycle against a real environment.
 
 | Pass Rate | Bugs Found | Risk Status |
 |-----------|-----------|-------------|
-| Unknown (0/9 executed — no run evidence supplied) | 0 logged (not measured — no execution occurred) | 🔴 Red |
+| Not measured (0/11 executed — no run log provided) | 0 (0 critical) — none logged because no execution occurred, not because none exist | 🔴 Red |
 
 ---
 
 ## Execution by Area
 
+No run log was provided for this cycle; the table below reflects the 11 approved/automated test cases with execution status "not run," not "passed."
+
 | Area | Executed | Passed | Failed | Skipped | Notes |
 |------|----------|--------|--------|---------|-------|
-| Promo Discount / Amount Integrity (R-01) — TC-001–004 | 0 | 0 | 0 | 0 | No run log supplied. TC-001 has a coded assertion but no execution result; TC-002/003/004 are `test.fixme` placeholders — not runnable (percentage/fixed/stacked promo rates marked TBD in test basis) |
-| Stock/Payment State Consistency (R-02) — TC-005 | 0 | 0 | 0 | 0 | Coded, requires `SANDBOX_RESERVED_ITEM_ID` — no run evidence supplied |
-| Card Data Non-Exposure (R-03) — TC-006 | 0 | 0 | 0 | 0 | Coded, requires `SANDBOX_DECLINE_CARD_NUMBER` — no run evidence supplied |
-| Idempotent Retry (R-04) — TC-007 | 0 | 0 | 0 | 0 | Coded, requires `SANDBOX_TIMEOUT_CARD_NUMBER` — no run evidence supplied |
-| Promo Input Validation (R-05) — TC-008, TC-009 | 0 | 0 | 0 | 0 | Coded and does not depend on sandbox env vars, but no run evidence supplied this cycle |
-
-*Executed/Passed/Failed/Skipped counts are unknown per artifact evidence, not asserted as zero-defect; shown as 0 because no execution log exists to populate these fields (TMMi evidence rule).*
+| Payment Gateway Authorization (TC-001–003) | 0 | 0 | 0 | 0 | Not run this session — no execution log/artifact supplied |
+| Stock & Cart Lock Consistency (TC-004) | 0 | 0 | 0 | 0 | Not run — order-status literal ("Could Not Be Fulfilled") still unconfirmed |
+| Card Data Security (TC-005, TC-006) | 0 | 0 | 0 | 0 | Not run — CVV/PAN masking checks drafted only |
+| Duplicate Capture Prevention (TC-007) | 0 | 0 | 0 | 0 | Not run — result is provisional pending idempotency-key mechanism confirmation (Test Plan blocker) |
+| Promo & Price Recalculation (TC-008) | 0 | 0 | 0 | 0 | Not run |
+| Promo Eligibility Boundary (TC-009–011) | 0 | 0 | 0 | 3 | Auto-skip in code until `PROMO_MIN_CART_VALUE` env var is configured — threshold TBD |
 
 ---
 
 ## Defect Summary
 
-No defect records were supplied in any artifact for this cycle (no bug tracker export, log, or run report provided). Bug severity distribution cannot be quantified from measured evidence:
+No defects are logged. **This is not evidence of a defect-free system** — testing shows the presence of defects, not their absence, and here no execution occurred at all, so no opportunity to observe one existed.
 
-| Severity | Count |
-|----------|-------|
-| Critical | 0 (not measured) |
-| High | 0 (not measured) |
-| Medium | 0 (not measured) |
-| Low | 0 (not measured) |
-| **Total** | **0 (not measured)** |
+| ID | Severity | Title | Area | Status | Ticket |
+|----|----------|-------|------|--------|--------|
+| — | — | No defects recorded — no execution evidence available this session | — | — | — |
 
-No defect table rows are populated — fabricating IDs, titles, or ticket references without source evidence is prohibited (ISO/IEC 42001).
+**Bug severity distribution:** Critical: 0, High: 0, Medium: 0, Low: 0 (all unmeasured — no run occurred).
 
 ---
 
 ## Quality Gate Verdict
 
-Graded against the "Approved Exit Criteria" (EN-1–EN-3) supplied in the Test-context artifact, matched verbatim to the Plan's Entry Criteria wording:
-
 | DoD Criterion | Target | Actual | Verdict |
 |---------------|--------|--------|---------|
-| Sandbox/test bank credentials and gateway test environment available | Confirmed available | Plan's Blockers list this item as still open (Owner: TBD, needed by: TBD); Automate fixtures throw/skip when `GATEWAY_SANDBOX_API_URL` and card env vars are unset — no confirmation of availability supplied | Not met |
-| Order-of-operations for stock revalidation vs. promo vs. capture documented | Confirmed / documented before test design starts | Plan's Blockers list this item as still open (Owner: TBD, needed by: TBD); no documentation artifact was supplied | Not met |
-| Test basis (card payment, promo code, stock validation requirements) reviewed and baselined | Sign-off obtained from test basis owner | Every artifact in this cycle (Scenarios, Cases, Plan, Automate) is explicitly labeled "draft, pending tester review" / "not an approval" — no sign-off evidence exists | Not met |
+| Scenario pass rate on the critical path (card payment, promo, stock flows) | >= 90% | Not measured — no execution log provided this session | Not met |
+| Open Critical or High severity defects at sign-off | 0 | Unknown — no defect log exists; zero cannot be confirmed without an execution run | Not met |
+| Security scenarios (CVV/PCI non-exposure, promo-field injection/oversized input) executed | 100% executed | 0% executed — TC-005/TC-006 drafted but not run | Not met |
+| Duplicate-charge (idempotency) retry scenario executed and result confirmed | Blocked pending confirmation of idempotency mechanism | Still blocked — idempotency-key mechanism unconfirmed; TC-007 assertion remains provisional per Test Plan blocker | Not met |
 
-**Overall: FAIL**
-
-*Note: the Plan's own Definition of Done (EC-1–EC4, e.g. ≥90% critical-path pass rate) could not be graded at all — no execution evidence exists to measure pass rate, open defects, security-scenario completion, or risk-register coverage against it. Per the no-fabrication rule this is flagged as an omission risk below rather than scored.*
+**Overall: FAIL** _(draft mechanical rollup of the criteria above — release sign-off decision rests with the tester, per ISO/IEC 42001)_
 
 ---
 
@@ -62,28 +58,28 @@ Graded against the "Approved Exit Criteria" (EN-1–EN-3) supplied in the Test-c
 
 | Risk | Untested Area | Reason Skipped |
 |------|--------------|----------------|
-| Amount integrity for percentage/fixed-amount/stacked promos (R-01) unverified | TC-002, TC-003, TC-004 | Sandbox promo rates and expected discounted totals were never supplied in the test basis; implemented only as `test.fixme` placeholders |
-| Entry criteria unresolved may invalidate any future execution against unconfirmed environment | EN-1: sandbox/gateway environment confirmation | Blocker open since Plan stage, owner/date still TBD |
-| Stock-vs-promo-vs-capture sequencing behavior unknown, risking incorrect test design | EN-2: order-of-operations documentation | Blocker open since Plan stage, owner/date still TBD |
-| No sign-off exists on the test basis itself, so scope could still shift | EN-3: test basis baseline sign-off | All artifacts remain in draft status pending tester review |
-| Draft locator names (`data-testid`) in `checkout-page.ts` unconfirmed against live markup | All 9 coded test cases (execution reliability) | No Recorded Baseline was supplied to confirm selectors before first run |
-| Gateway sandbox API endpoint paths in `payment-gateway-sandbox.ts` are draft assumptions | All API-dependent assertions (TC-001, TC-005, TC-006, TC-007) | No confirmed sandbox API contract supplied |
-| Saved/tokenized card flows, refunds, chargebacks, non-card payment methods, settlement/reconciliation remain fully untested | All areas outside stated scope | Explicitly out of scope per Brainstorm and Plan "Not in Scope" sections this cycle |
+| No execution evidence exists for this cycle | All 11 test cases (TC-001–TC-011) | No test run was performed or no run log/artifact was supplied this session; automation exists in draft form only |
+| Idempotency-key mechanism unconfirmed | Duplicate Capture Prevention (TC-007) | Test Plan blocker R-04/EC-4 unresolved — dev/business confirmation pending |
+| Promo minimum-cart-value threshold is TBD | Promo Eligibility Boundary (TC-009, TC-010, TC-011) | Business rule not confirmed; automation auto-skips without `PROMO_MIN_CART_VALUE` configured |
+| Order-status literal strings unconfirmed | Payment Gateway Authorization & Stock Reversal (TC-001–TC-004) | Literals ("Confirmed", "Payment Failed", "Pending Retry", "Could Not Be Fulfilled") were drafted from risk-description language, not verified against the system's actual status enum |
+| `data-testid` selectors are placeholders | All UI-driven automated cases | No Recorded Baseline was supplied this session; selector names in `checkout-page.ts` must be confirmed against real markup before first run |
 
 ---
 
 ## AI Usage Summary
 
+_Figures below are as measured and supplied for this session; none are estimated. The Report-stage row reflects this generation call, whose own cost has not yet been measured/returned to this session._
+
 | Stage | Input Tokens | Output Tokens | Cache Hits | Cost (USD) |
 |-------|-------------|---------------|------------|-----------|
-| Brainstorm | 127 | 2,485 | 0 | $0.0377 |
-| Plan | 1,664 | 5,068 | 0 | $0.0810 |
-| Scenarios | 4,329 | 13,465 | 0 | $0.2150 |
-| Cases | 1,911 | 4,816 | 0 | $0.0780 |
-| Automate | 4,545 | 12,750 | 0 | $0.2049 |
-| Report | not measured | not measured | not measured | not measured |
-| **Total (excl. Report)** | **12,576** | **38,584** | **0** | **$0.6165** |
+| Brainstorm | 127 | 2,365 | 0 | $0.0359 |
+| Plan | 1,515 | 5,946 | 0 | $0.0937 |
+| Scenarios | 3,925 | 10,256 | 0 | $0.1656 |
+| Cases | 1,789 | 6,862 | 0 | $0.1083 |
+| Automate | 4,164 | 21,580 | 0 | $0.3362 |
+| Report | Not measured | Not measured | Not measured | Not measured |
+| **Total (Brainstorm–Automate)** | **11,520** | **47,009** | **0** | **$0.7397** |
 
 ---
 
-_Generated by TestFlowAssistant — Stage: Report. This is a draft for tester review; no field in this report constitutes approval, sign-off, or an authoritative release decision — a human tester must review and decide._
+_Generated by TestFlowAssistant — Stage: Report. Draft for tester review; not approved or signed off._
