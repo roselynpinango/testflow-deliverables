@@ -1,42 +1,51 @@
 /**
  * Fixture-based test data for Checkout Payment Regression automation.
- * All sandbox identifiers are sourced from environment variables — no real
- * card data or credentials are hardcoded here. Where an env var is not
- * configured, a clearly-marked TBD placeholder is used so failures are
- * traceable to missing configuration rather than a silent wrong value.
+ * No real card data is used — SANDBOX_* values must point to test/sandbox
+ * gateway credentials configured in the test environment, never production data.
+ *
+ * Values that are business-rule dependent and not yet confirmed (see Test Plan
+ * blockers) are left undefined rather than guessed — tests that need them are
+ * skipped with an explicit reason until the value is confirmed.
  */
 
-export interface CardFixture {
-  cardNumber: string;
+export interface CardDetails {
+  number: string;
   expiry: string;
   cvv: string;
 }
 
-export const validSandboxCard: CardFixture = {
-  cardNumber: process.env.SANDBOX_CARD_VALID_NUMBER ?? 'TBD-SANDBOX-VALID-CARD-NUMBER',
-  expiry: process.env.SANDBOX_CARD_VALID_EXPIRY ?? 'TBD-SANDBOX-VALID-EXPIRY',
-  cvv: process.env.SANDBOX_CARD_VALID_CVV ?? 'TBD-SANDBOX-VALID-CVV',
-};
-
-export const declineSandboxCard: CardFixture = {
-  cardNumber: process.env.SANDBOX_CARD_DECLINE_NUMBER ?? 'TBD-SANDBOX-DECLINE-CARD-NUMBER',
-  expiry: process.env.SANDBOX_CARD_DECLINE_EXPIRY ?? 'TBD-SANDBOX-DECLINE-EXPIRY',
-  cvv: process.env.SANDBOX_CARD_DECLINE_CVV ?? 'TBD-SANDBOX-DECLINE-CVV',
-};
-
-// Deliberately malformed (2-digit) CVV for negative-path validation testing.
-export const invalidCvv = process.env.SANDBOX_CVV_INVALID_FORMAT ?? '9X';
-
-export const promoCodes = {
-  percentage: process.env.SANDBOX_PROMO_PERCENTAGE ?? 'TBD-PROMO-PERCENTAGE',
-  flat: process.env.SANDBOX_PROMO_FLAT ?? 'TBD-PROMO-FLAT',
-  expired: process.env.SANDBOX_PROMO_EXPIRED ?? 'TBD-PROMO-EXPIRED',
-} as const;
-
-/**
- * Generates a unique idempotency key per test invocation so tests remain
- * independent and never share mutable retry state across runs.
- */
-export function generateIdempotencyKey(): string {
-  return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing required test data env var "${name}". Configure it in the test ` +
+        `environment (sandbox/test bank credentials only — see fixtures/test-data.ts).`
+    );
+  }
+  return value;
 }
+
+// Sandbox card used for all card-payment scenarios. The actual authorization
+// outcome (approved/declined/timeout) is controlled per-test via gateway
+// route mocking, not by which sandbox card is used.
+export const sandboxCard: CardDetails = {
+  number: requireEnv('SANDBOX_CARD_NUMBER'),
+  expiry: requireEnv('SANDBOX_CARD_EXPIRY'),
+  cvv: requireEnv('SANDBOX_CARD_CVV'),
+};
+
+export const testPromoCode = requireEnv('TEST_PROMO_CODE');
+
+// TC-008 fixture: a recalculated cart total value used to verify the debited
+// amount matches recalculation after a price change. This is arbitrary test
+// fixture data, not a measured production figure.
+export const recalculatedCartTotalFixture = requireEnv('TEST_RECALCULATED_CART_TOTAL');
+
+// TC-009/010/011: the promo's real minimum-eligible-cart-value threshold is
+// TBD pending business-rule confirmation (see Test Plan blockers). Tests that
+// depend on it are skipped when this env var is not configured — the
+// threshold is never guessed.
+const promoMinCartValueRaw = process.env.PROMO_MIN_CART_VALUE;
+export const promoMinCartValue: number | undefined = promoMinCartValueRaw
+  ? Number(promoMinCartValueRaw)
+  : undefined;
