@@ -6,17 +6,7 @@
 
 | Field | Value |
 |-------|-------|
-| Coverage target | Not specified — no coverage target was provided in the tester context; see DoD EC-4 below, which is flagged as unmeasurable until this is supplied. |
-
----
-
-## Entry Criteria
-
-| ID | Criterion | Measurable | Target |
-|----|-----------|-----------|--------|
-| EN-1 | Brainstorm Impact Analysis reviewed and available as test basis | Yes | 1 approved artifact on file |
-| EN-2 | Sandbox/test bank credentials for card payment provisioned | Yes | Credentials received (currently an open blocker — see Blockers) |
-| EN-3 | Clarification received on promo-vs-stock-check sequencing in checkout flow | Yes | Answer documented before functional test design starts |
+| Coverage target | TBD — not specified (no coverage target figure supplied in tester context; draft DoD targets below are proposed planning goals pending tester confirmation) |
 
 ---
 
@@ -24,11 +14,12 @@
 
 | ID | Risk | Impact Area | Likelihood | Impact | Mitigation |
 |----|------|-------------|-----------|--------|-----------|
-| R-01 | Authorized/captured amount does not match final cart total after promo or stock-driven recalculation | Functional suitability | 5 | 5 | Add a test case asserting captured amount equals the final recalculated cart total immediately before payment submission is permitted to proceed |
-| R-02 | Duplicate debit occurs on payment retry after timeout or network failure mid-checkout | Reliability | 4 | 5 | Add a test simulating a timed-out submission followed by retry using the same idempotency key, and assert exactly one debit/authorization is recorded |
-| R-03 | Item goes out of stock between promo application and payment submission, causing order confirmed without capture, or capture without valid order | Reliability / Functional suitability | 4 | 4 | Add a test forcing a stock-out mid-flow and assert no capture occurs without a valid order, and no order confirms without a successful capture callback |
-| R-04 | CVV/card data or promo-code error responses expose sensitive data in UI, URL, or logs; promo-code field accepts injection/oversized input | Security | 3 | 5 | Add tests asserting CVV/PAN are masked (first6/last4 only) in UI, API responses, and logs; add promo-code injection and oversized-input tests asserting rejection with no data exposure |
-| R-05 | Promo code stacking, expiry, or malformed-code handling produces an incorrect final charged amount | Functional suitability | 3 | 3 | Add test cases for stacked-code rejection, expired-code rejection, and malformed-code handling, each asserting the charged amount matches the expected discount computation |
+| R-01 | Order confirmed despite payment authorization failure/timeout (order status–gateway state mismatch) | Functional suitability | 4 | 5 | Add a test case asserting order status is set to "Confirmed" only when gateway authorization response = approved; assert no order is created on authorization failure/timeout |
+| R-02 | Stock changes between cart display and payment capture (race condition), causing charge for unavailable item | Functional suitability | 4 | 4 | Add a test case re-validating stock at the capture step (not only at cart-add); assert reversal or partial-fulfillment flow triggers when stock changes between authorization and capture |
+| R-03 | Card is charged a stale/incorrect amount because promo discount is not recalculated against the final validated cart before capture | Functional suitability | 3 | 5 | Add a test case verifying the captured amount equals the cart total recalculated after final promo and stock validation, immediately before the capture call |
+| R-04 | Duplicate charge on retry after network timeout due to missing/unverified idempotency key mechanism | Reliability | 3 | 5 | Add a test case simulating timeout-then-retry with the same idempotency key; assert exactly one charge and one order are created, not duplicates |
+| R-05 | CVV or full card number exposed in logs, URLs, or error/API responses | Security | 2 | 5 | Add a test case inspecting API responses, UI error states, and log output for card data; assert only masked first6/last4 is displayed and CVV is never persisted or logged |
+| R-06 | Promo code field accepts oversized or injection-pattern input, exposing backend behavior or error detail | Security | 3 | 3 | Add a test case submitting oversized and injection-pattern strings into the promo code field; assert rejection with a generic error message and no backend stack trace or internal detail leak |
 
 ---
 
@@ -36,13 +27,17 @@
 
 | Test Type | Scope | Approach | Tooling | Owner | Story Points |
 |-----------|-------|----------|---------|-------|-------------|
-| Functional | Card payment authorization/capture, promo code application, stock validation, and their combined sequencing at checkout | Derive test conditions individually per functional area from the test basis (card payment, promo, stock), then design combined scenarios covering promo-then-stock-then-payment ordering; justified because the test basis names these as three distinct converging behaviors requiring both isolated and interaction coverage (functional suitability) | TBD — not specified | — | Not specified |
-| Regression | Existing checkout payment paths re-verified whenever promo/stock logic changes; focus on amount-integrity and duplicate-debit paths flagged in the risk register | Re-execute prior checkout regression cases plus new R-01/R-02 interaction scenarios; justified by domain defect-clustering history (duplicate debits, amount mismatches are recurring patterns in this area) | TBD — sandbox/test bank credentials pending (see Blockers) | — | Not specified |
-| Integration | Cross-component state consistency between payment gateway, promo engine, and inventory service (order status vs. bank debit vs. stock count) | Design test conditions that simulate a stock change or promo recalculation mid-checkout and verify the resulting order/payment/stock states remain consistent across all three services; justified because these are separate components whose desynchronization is the mechanism behind R-01 and R-03 | TBD — not specified | — | Not specified |
+| Functional | Card payment authorization/capture, promo code calculation, stock validation — the three flows named in the test basis | Condition-level test design per flow (equivalence partitioning on cart/stock states, boundary values on promo amounts); each test traces to a named test basis flow | Manual/exploratory execution + API test client against checkout API | — | TBD — not specified |
+| Regression | Checkout regression pack focused on payment × promo × stock intersection points identified in the risk register | Risk-based regression, prioritized by R-01–R-04 scores; re-run each build touching checkout, payment, or inventory code | Automated API regression suite (tool TBD — not specified) | — | TBD — not specified |
+| Integration | Payment gateway webhook/callback reconciliation with stock decrement and promo ledger | Cross-component state-consistency checks against a sandbox gateway; verify callback timing does not cause duplicate charge or double stock decrement | Sandbox/test gateway credentials, API test client | — | TBD — not specified |
+| Security | CVV/card data exposure surfaces, promo code input field, PCI-DSS-aligned masking | Negative/security test design: masked-data verification in UI/API/logs, injection-pattern and oversized-input submission, error-response inspection for detail leakage | Manual + API test client with crafted malicious/oversized payloads (sandbox data only, no real card numbers) | — | TBD — not specified |
 
-Security is not a separate row in this table because it is woven into Functional and Regression scope per R-04; per the regulated-industry mandate, security scenarios (CVV masking, promo-field injection/oversized input) are mandatory and their absence would fail the quality gate — see R-04.
-
-Performance/load testing is explicitly out of scope per the discipline boundary and is tracked only as a risk in the brainstorm artifact, not as a test type here.
+**Rationale (per ISTQB test type justification):**
+- **Functional** is included because the test basis explicitly names three functional flows requiring condition-level correctness verification.
+- **Regression** is included because checkout is a high-change, high-traffic path where defect clustering is expected at the payment/discount/inventory intersection (known pattern: order confirmed despite payment failure).
+- **Integration** is included because payment gateway and inventory service state consistency cannot be verified by testing either component in isolation.
+- **Security** is included per regulated-industry requirement: card payment is a PCI-DSS-relevant entry point and the promo code field is an untrusted input surface.
+- **Performance/load** is intentionally excluded — out of discipline scope; the underlying concurrency risk is tracked as R-02 with a functional (not load) mitigation.
 
 ---
 
@@ -50,31 +45,33 @@ Performance/load testing is explicitly out of scope per the discipline boundary 
 
 | ID | Criterion | Measurable | Target |
 |----|-----------|-----------|--------|
-| EC-1 | Scenario pass rate on the critical path (card payment authorization + capture, including R-01/R-02 scenarios) | Yes | ≥ 95% |
+| EC-1 | Scenario pass rate on the critical path (card payment + promo + stock intersection scenarios) | Yes | >= 95% |
 | EC-2 | Open Critical or High severity defects at sign-off | Yes | 0 |
-| EC-3 | Planned security scenarios (CVV masking, promo-code injection/oversized input) executed | Yes | 100% of planned security test cases executed |
-| EC-4 | Overall checkout regression suite coverage against test basis | No — no coverage target has been supplied; cannot be graded until provided | TBD — pending stakeholder input |
+| EC-3 | Planned security test conditions (CVV/card masking, promo field injection/oversized input) executed | Yes | 100% |
+| EC-4 | Test conditions traced to the three core test basis flows (card payment, promo code, stock validation) | Yes | 100% |
+
+_Note: these are draft planning targets proposed for tester review, not measured results — no execution has occurred yet._
 
 ---
 
 ## Blockers / Dependencies
 
-- Confirm whether promo code validation occurs before or after stock check in the checkout sequence (Owner: TBD, needed by: not specified)
-- Confirm 3DS/OTP requirement applies to this checkout flow — not stated in test basis (Owner: TBD, needed by: not specified)
-- Test bank/sandbox credentials for card payment scenarios (Owner: TBD, needed by: not specified)
+- Confirm whether 3D Secure/OTP step is in scope for this checkout flow — Owner: TBD — not specified
+- Confirm promo code stacking rules (single vs. multiple codes) — not specified in test basis — Owner: TBD — not specified
+- Confirm idempotency key mechanism exists for retry-on-timeout card payment — Owner: TBD — not specified
 
 ---
 
 ## Not in Scope
 
-- Performance/load/stress testing of checkout under concurrent traffic (out of scope per discipline boundary; tracked as a performance efficiency risk, not tested)
-- BNPL, wallet top-up, and net banking/UPI payment methods (not mentioned in test basis; card payment only)
-- Refund/chargeback lifecycle (not part of this test basis — point-of-purchase only)
-- Cross-currency/multi-bank conversion display (not indicated in test basis; TBD whether checkout supports multi-currency)
-- Backend reconciliation/settlement cycle verification (outside web/API test scope this cycle)
+- Bank-side settlement/reconciliation processing (T+1/T+2 cycle) — outside checkout system boundary
+- BNPL, wallet top-up, and net banking/UPI payment methods — not part of this test basis (card payment only)
+- Refund/chargeback lifecycle — not mentioned in test basis
+- Performance/load behavior under concurrent stock contention — documented as reliability risk (R-02); load/stress testing is out of discipline scope
+- Cross-currency/multi-bank processing delays — no multi-currency requirement stated in test basis
 
 ---
 
 _Generated by TestFlowAssistant — Stage: Test Plan_
 
-This draft reflects the approved Brainstorm artifact and the tester context supplied. It has not been reviewed or approved — a human tester must review and sign off before this plan is considered authoritative, and the open blockers and TBD/Not specified fields above should be resolved first.
+This draft is for tester review — it is not an approved or authoritative artifact until you sign off on it.
