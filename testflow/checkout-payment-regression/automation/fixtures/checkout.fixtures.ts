@@ -1,24 +1,37 @@
-import { test as base } from '@playwright/test';
-import { CheckoutPage } from '../pages/CheckoutPage';
+import { test as base, expect } from '@playwright/test';
+import { randomUUID } from 'crypto';
+import { CheckoutPage } from '../pages/checkout.page';
+import { PaymentApiClient } from '../helpers/api-client';
 import { testData } from './test-data';
 
 type CheckoutFixtures = {
   checkoutPage: CheckoutPage;
-  testData: typeof testData;
+  apiClient: PaymentApiClient;
+  orderId: string;
+  idempotencyKey: string;
 };
 
 /**
- * Shared fixtures so specs never duplicate page-object construction or test-data
- * imports. Each test receives a fresh Playwright `page`, so no mutable state is
- * shared across tests.
+ * Each test gets its own orderId/idempotencyKey (runtime-generated, not fabricated
+ * business data) so tests remain independent with no shared mutable state.
  */
 export const test = base.extend<CheckoutFixtures>({
-  checkoutPage: async ({ page }, use) => {
-    await use(new CheckoutPage(page));
+  orderId: async ({}, use) => {
+    await use(randomUUID());
   },
-  testData: async ({}, use) => {
-    await use(testData);
+  idempotencyKey: async ({}, use) => {
+    await use(randomUUID());
+  },
+  apiClient: async ({}, use) => {
+    const client = await PaymentApiClient.create();
+    await use(client);
+    await client.dispose();
+  },
+  checkoutPage: async ({ page, orderId }, use) => {
+    const checkoutPage = new CheckoutPage(page);
+    await checkoutPage.goto(orderId);
+    await use(checkoutPage);
   },
 });
 
-export { expect } from '@playwright/test';
+export { expect, testData };

@@ -1,11 +1,31 @@
 /**
- * Non-secret, provisional test-data constants.
- * Anything sensitive (promo codes, card tokens, item ids, order ids, session tokens)
- * is NOT stored here — it is read from env vars via helpers/env.ts at test time.
+ * Fixture-based test data for Checkout Payment regression.
+ * No real card/CVV values are hardcoded — sandbox/test bank credentials remain
+ * an open blocker (EN-2, carried forward from the Scenarios stage). Populate the
+ * referenced env vars with sandbox-issued test values before executing this suite.
  */
 
-// TC-002 / Scenario 2: the exact order-state label is explicitly marked TBD in the
-// Approved Cases artifact, pending confirmation of the stock validation timing model.
-// This constant reproduces the illustrative label already used in TC-002 — it is not
-// a fabricated fact, but it MUST be revisited once the real state model is confirmed.
-export const PROVISIONAL_PENDING_FULFILLMENT_REVIEW_STATE = 'pending_fulfillment_review';
+export const testData = {
+  cart: {
+    // TBD: populate with the sandbox test item id once EN-2 is resolved.
+    itemId: process.env.TEST_ITEM_ID ?? 'TBD',
+  },
+  promoCodes: {
+    // TBD: populate with a sandbox-valid promo code once EN-2 is resolved.
+    valid: process.env.TEST_PROMO_VALID ?? 'TBD',
+    malformed: '!!invalid-format!!',
+    stacked: 'STACK2',
+    expired: 'EXPIRED10',
+    // Oversized-input length is not sourced from a documented field limit (not measured).
+    // Using an arbitrary large value to exercise the boundary; confirm the real limit
+    // with the test basis before treating this as a precise boundary test.
+    oversized: 'A'.repeat(2049),
+    injection: '<script>alert(1)</script>',
+  },
+  card: {
+    // TBD: sandbox/test bank credentials (EN-2 open blocker). Never populate with real card data.
+    number: process.env.TEST_CARD_NUMBER ?? 'TBD',
+    cvv: process.env.TEST_CARD_CVV ?? 'TBD',
+    expiry: process.env.TEST_CARD_EXPIRY ?? 'TBD',
+  },
+};
