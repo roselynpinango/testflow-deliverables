@@ -1,0 +1,13 @@
+{
+  "name": "testflow-automation-testflowassistant-sign-in",
+  "private": true,
+  "description": "Generated Playwright suite for TestFlowAssistant sign-in",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.0"
+  }
+}
