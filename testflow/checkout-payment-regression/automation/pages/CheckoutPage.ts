@@ -1,64 +1,49 @@
-import { Page, Locator } from '@playwright/test';
-import { CardFixture } from '../fixtures/test-data';
+import { Page } from '@playwright/test';
 
 /**
- * Page Object Model for the checkout page. All selectors use data-testid
- * per the project's selector standard — no brittle CSS selectors.
+ * Page Object for the checkout page. Selectors use data-testid only.
+ * NOTE: no Recorded Baseline was supplied for this stage, so the data-testid names
+ * below are the automation's own interface into the checkout UI — they must be
+ * reconciled with real selectors the first time this suite runs against the app.
  */
 export class CheckoutPage {
-  readonly page: Page;
-  readonly cardNumberInput: Locator;
-  readonly cardExpiryInput: Locator;
-  readonly cvvInput: Locator;
-  readonly submitPaymentButton: Locator;
-  readonly cvvValidationError: Locator;
-  readonly promoCodeInput: Locator;
-  readonly promoApplyButton: Locator;
-  readonly promoError: Locator;
-  readonly cartTotal: Locator;
-  readonly outOfStockError: Locator;
+  constructor(private readonly page: Page) {}
 
-  constructor(page: Page) {
-    this.page = page;
-    this.cardNumberInput = page.getByTestId('checkout-card-number');
-    this.cardExpiryInput = page.getByTestId('checkout-card-expiry');
-    this.cvvInput = page.getByTestId('checkout-cvv');
-    this.submitPaymentButton = page.getByTestId('checkout-submit-payment');
-    this.cvvValidationError = page.getByTestId('checkout-cvv-error');
-    this.promoCodeInput = page.getByTestId('checkout-promo-code');
-    this.promoApplyButton = page.getByTestId('checkout-promo-apply');
-    this.promoError = page.getByTestId('checkout-promo-error');
-    this.cartTotal = page.getByTestId('checkout-cart-total');
-    this.outOfStockError = page.getByTestId('checkout-out-of-stock-error');
+  async gotoCheckout(): Promise<void> {
+    await this.page.goto('/checkout');
   }
 
-  async goto(): Promise<void> {
-    const checkoutUrl = process.env.CHECKOUT_URL;
-    if (!checkoutUrl) {
-      throw new Error(
-        'CHECKOUT_URL env var is not set — checkout base URL is not specified in the test basis (TBD).'
-      );
-    }
-    await this.page.goto(checkoutUrl);
-  }
-
-  async fillCard(card: CardFixture): Promise<void> {
-    await this.cardNumberInput.fill(card.cardNumber);
-    await this.cardExpiryInput.fill(card.expiry);
-    await this.cvvInput.fill(card.cvv);
-  }
-
-  /** Moves focus away from the CVV field by tabbing to the next field. */
-  async blurCvv(): Promise<void> {
-    await this.cvvInput.press('Tab');
-  }
-
-  async submitPayment(): Promise<void> {
-    await this.submitPaymentButton.click();
+  async reloadCart(): Promise<void> {
+    await this.page.reload();
   }
 
   async applyPromoCode(code: string): Promise<void> {
-    await this.promoCodeInput.fill(code);
-    await this.promoApplyButton.click();
+    await this.page.getByTestId('promo-code-input').fill(code);
+    await this.page.getByTestId('apply-promo-button').click();
   }
+
+  async getDisplayedTotalCents(): Promise<number> {
+    const text = await this.page.getByTestId('cart-total').textContent();
+    if (!text) {
+      throw new Error('Cart total element (data-testid="cart-total") returned no text content');
+    }
+    return parseAmountToCents(text);
+  }
+
+  async submitPayment(): Promise<void> {
+    await this.page.getByTestId('submit-payment-button').click();
+  }
+
+  async getOrderId(): Promise<string> {
+    const text = await this.page.getByTestId('order-id').textContent();
+    if (!text) {
+      throw new Error('Order id element (data-testid="order-id") returned no text content after payment submission');
+    }
+    return text.trim();
+  }
+}
+
+function parseAmountToCents(displayed: string): number {
+  const numeric = displayed.replace(/[^0-9.]/g, '');
+  return Math.round(parseFloat(numeric) * 100);
 }

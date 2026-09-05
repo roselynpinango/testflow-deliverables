@@ -10,528 +10,473 @@ APP_URL=https://your-app.example.com npx playwright test
 reports what it could not reach, rather than passing silently.
 ---
 
-Below is the automation suite for all 11 approved test cases (TC-001–TC-011), organized by risk band (critical → high → medium) across 2 spec files, with shared fixtures and a POM. No repository was connected, so everything is new.
+# Checkout Payment Regression — Automate Stage
 
-### `fixtures/test-data.ts`
+**Test basis:** Approved Scenarios + Approved Cases (TC-001–TC-009)
+**Repository state:** none connected — all files below are new.
+**Coverage:** 9 of 9 approved test cases implemented (within the 12-test / 2-file budget), ordered critical → high → medium within each file.
+
+Draft for tester review — not approved or authorized for execution until a human reviewer signs off.
+
+---
+
+### `helpers/env.ts`
+
 ```typescript
 /**
- * Fixture-based test data for Checkout Payment Regression automation.
- * No real card data is used — SANDBOX_* values must point to test/sandbox
- * gateway credentials configured in the test environment, never production data.
- *
- * Values that are business-rule dependent and not yet confirmed (see Test Plan
- * blockers) are left undefined rather than guessed — tests that need them are
- * skipped with an explicit reason until the value is confirmed.
+ * Central helper for reading required environment/config values.
+ * No credentials, tokens, or test data are hardcoded anywhere in this suite —
+ * everything sensitive or environment-specific must come from env vars
+ * supplied by the sandbox/test environment.
  */
-
-export interface CardDetails {
-  number: string;
-  expiry: string;
-  cvv: string;
-}
-
-function requireEnv(name: string): string {
+export function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
     throw new Error(
-      `Missing required test data env var "${name}". Configure it in the test ` +
-        `environment (sandbox/test bank credentials only — see fixtures/test-data.ts).`
+      `Missing required environment variable: ${name}. ` +
+        `Set it in the test environment using sandbox/test values only — never real card data.`
     );
   }
   return value;
 }
-
-// Sandbox card used for all card-payment scenarios. The actual authorization
-// outcome (approved/declined/timeout) is controlled per-test via gateway
-// route mocking, not by which sandbox card is used.
-export const sandboxCard: CardDetails = {
-  number: requireEnv('SANDBOX_CARD_NUMBER'),
-  expiry: requireEnv('SANDBOX_CARD_EXPIRY'),
-  cvv: requireEnv('SANDBOX_CARD_CVV'),
-};
-
-export const testPromoCode = requireEnv('TEST_PROMO_CODE');
-
-// TC-008 fixture: a recalculated cart total value used to verify the debited
-// amount matches recalculation after a price change. This is arbitrary test
-// fixture data, not a measured production figure.
-export const recalculatedCartTotalFixture = requireEnv('TEST_RECALCULATED_CART_TOTAL');
-
-// TC-009/010/011: the promo's real minimum-eligible-cart-value threshold is
-// TBD pending business-rule confirmation (see Test Plan blockers). Tests that
-// depend on it are skipped when this env var is not configured — the
-// threshold is never guessed.
-const promoMinCartValueRaw = process.env.PROMO_MIN_CART_VALUE;
-export const promoMinCartValue: number | undefined = promoMinCartValueRaw
-  ? Number(promoMinCartValueRaw)
-  : undefined;
 ```
 
-### `pages/checkout-page.ts`
+---
+
+### `fixtures/test-data.ts`
+
 ```typescript
-import { Page } from '@playwright/test';
-import { CardDetails } from '../fixtures/test-data';
+/**
+ * Non-secret, provisional test-data constants.
+ * Anything sensitive (promo codes, card tokens, item ids, order ids, session tokens)
+ * is NOT stored here — it is read from env vars via helpers/env.ts at test time.
+ */
+
+// TC-002 / Scenario 2: the exact order-state label is explicitly marked TBD in the
+// Approved Cases artifact, pending confirmation of the stock validation timing model.
+// This constant reproduces the illustrative label already used in TC-002 — it is not
+// a fabricated fact, but it MUST be revisited once the real state model is confirmed.
+export const PROVISIONAL_PENDING_FULFILLMENT_REVIEW_STATE = 'pending_fulfillment_review';
+```
+
+---
+
+### `api/checkoutApiClient.ts`
+
+```typescript
+import { APIRequestContext, APIResponse } from '@playwright/test';
 
 /**
- * Page Object for the checkout payment page.
- * Selectors use data-testid only, per suite convention.
- * NOTE: no Recorded Baseline was provided for this session — these
- * data-testid names are placeholders and must be confirmed/aligned with the
- * actual application markup before first run.
+ * Thin client over the checkout/payment sandbox API.
+ *
+ * ASSUMPTION (flagged, not fabricated as fact): the `/test-support/...` endpoints below
+ * represent an assumed sandbox test-orchestration contract (stock manipulation, gateway
+ * callback simulation, log inspection) needed to exercise race conditions and callback
+ * lifecycles deterministically. Confirm the actual contract with the API/backend team
+ * before running this suite against a real sandbox — paths and payload shapes are TBD
+ * until then.
+ *
+ * All requests are relative; the base URL comes from the Playwright config the
+ * application already owns (no URL is hardcoded here).
  */
-export class CheckoutPage {
-  constructor(private readonly page: Page) {}
+export class CheckoutApiClient {
+  constructor(private readonly request: APIRequestContext) {}
 
-  async goto() {
-    await this.page.goto('/checkout');
+  // --- Amount integrity / recalculation support ---
+
+  async triggerStockAdjustment(itemId: string): Promise<APIResponse> {
+    return this.request.post('/test-support/stock/adjust', { data: { itemId } });
   }
 
-  async selectCardPaymentMethod() {
-    await this.page.getByTestId('payment-method-card').click();
+  async markItemUnavailable(itemId: string): Promise<APIResponse> {
+    return this.request.post('/test-support/stock/mark-unavailable', { data: { itemId } });
   }
 
-  async fillCardDetails(card: CardDetails) {
-    await this.page.getByTestId('card-number-input').fill(card.number);
-    await this.page.getByTestId('card-expiry-input').fill(card.expiry);
-    await this.page.getByTestId('card-cvv-input').fill(card.cvv);
+  async getPaymentStatus(orderId: string): Promise<{ status: string; amountInCents?: number; capturedAmountInCents?: number }> {
+    const res = await this.request.get(`/test-support/orders/${orderId}/payment-status`);
+    return res.json();
   }
 
-  async submitPayment() {
-    await this.page.getByTestId('submit-payment-button').click();
+  // --- Stock/authorization race condition support (TC-002) ---
+
+  async initiatePaymentAuthorization(itemId: string): Promise<{ orderId: string }> {
+    const res = await this.request.post('/test-support/orders/initiate-authorization', { data: { itemId } });
+    return res.json();
   }
 
-  async getOrderStatusText(): Promise<string> {
-    const status = this.page.getByTestId('order-status');
-    await status.waitFor({ state: 'visible' });
-    return (await status.textContent())?.trim() ?? '';
+  async depleteStock(itemId: string): Promise<APIResponse> {
+    return this.request.post('/test-support/stock/deplete', { data: { itemId } });
   }
 
-  async getRetryButtonVisible(): Promise<boolean> {
-    return this.page.getByTestId('retry-payment-button').isVisible();
+  async getOrderStatus(orderId: string): Promise<{ status: string; stockHoldReleased?: boolean; paymentAuthorizationId?: string }> {
+    const res = await this.request.get(`/orders/${orderId}`);
+    return res.json();
   }
 
-  async getValidationMessageText(): Promise<string> {
-    const message = this.page.getByTestId('payment-validation-message');
-    await message.waitFor({ state: 'visible' });
-    return (await message.textContent())?.trim() ?? '';
+  // --- Gateway callback lifecycle support (TC-003/004/005) ---
+
+  async createOrderAwaitingCallback(): Promise<{ orderId: string }> {
+    const res = await this.request.post('/test-support/orders/awaiting-callback');
+    return res.json();
   }
 
-  async getDisplayedCardNumber(): Promise<string> {
-    const el = this.page.getByTestId('saved-card-display');
-    return (await el.textContent())?.trim() ?? '';
+  async sendGatewayCallback(orderId: string, status: 'success' | 'failure' | 'timeout'): Promise<APIResponse> {
+    return this.request.post('/test-support/gateway-callback', { data: { orderId, status } });
   }
 
-  async getCaptureCountText(): Promise<string> {
-    const el = this.page.getByTestId('capture-count');
-    return (await el.textContent())?.trim() ?? '';
+  // --- Security support (TC-006/007) ---
+
+  async submitDeclinedCardPayment(input: { cardNumber: string; cvv: string }): Promise<APIResponse> {
+    return this.request.post('/payments', {
+      data: { cardNumber: input.cardNumber, cvv: input.cvv },
+    });
   }
 
-  async getDebitedAmountText(): Promise<string> {
-    const el = this.page.getByTestId('debited-amount');
-    return (await el.textContent())?.trim() ?? '';
+  async getTransactionLog(transactionId: string): Promise<unknown> {
+    const res = await this.request.get(`/test-support/logs/${transactionId}`);
+    return res.json();
   }
 
-  async applyPromoCode(code: string) {
-    await this.page.getByTestId('promo-code-input').fill(code);
-    await this.page.getByTestId('apply-promo-button').click();
-  }
-
-  async getCartTotalText(): Promise<string> {
-    const el = this.page.getByTestId('cart-total');
-    return (await el.textContent())?.trim() ?? '';
-  }
-
-  async getPromoResultMessage(): Promise<string> {
-    const el = this.page.getByTestId('promo-result-message');
-    await el.waitFor({ state: 'visible' });
-    return (await el.textContent())?.trim() ?? '';
+  async submitPaymentWithToken(orderId: string, sessionToken: string): Promise<APIResponse> {
+    return this.request.post('/payments', {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      data: { orderId },
+    });
   }
 }
 ```
 
-### `fixtures/checkout.fixture.ts`
-```typescript
-import { test as base, Route } from '@playwright/test';
-import { CheckoutPage } from '../pages/checkout-page';
+---
 
-type GatewayResult = 'approved' | 'declined' | 'timeout';
+### `pages/CheckoutPage.ts`
+
+```typescript
+import { Page } from '@playwright/test';
+
+/**
+ * Page Object for the checkout page. Selectors use data-testid only.
+ * NOTE: no Recorded Baseline was supplied for this stage, so the data-testid names
+ * below are the automation's own interface into the checkout UI — they must be
+ * reconciled with real selectors the first time this suite runs against the app.
+ */
+export class CheckoutPage {
+  constructor(private readonly page: Page) {}
+
+  async gotoCheckout(): Promise<void> {
+    await this.page.goto('/checkout');
+  }
+
+  async reloadCart(): Promise<void> {
+    await this.page.reload();
+  }
+
+  async applyPromoCode(code: string): Promise<void> {
+    await this.page.getByTestId('promo-code-input').fill(code);
+    await this.page.getByTestId('apply-promo-button').click();
+  }
+
+  async getDisplayedTotalCents(): Promise<number> {
+    const text = await this.page.getByTestId('cart-total').textContent();
+    if (!text) {
+      throw new Error('Cart total element (data-testid="cart-total") returned no text content');
+    }
+    return parseAmountToCents(text);
+  }
+
+  async submitPayment(): Promise<void> {
+    await this.page.getByTestId('submit-payment-button').click();
+  }
+
+  async getOrderId(): Promise<string> {
+    const text = await this.page.getByTestId('order-id').textContent();
+    if (!text) {
+      throw new Error('Order id element (data-testid="order-id") returned no text content after payment submission');
+    }
+    return text.trim();
+  }
+}
+
+function parseAmountToCents(displayed: string): number {
+  const numeric = displayed.replace(/[^0-9.]/g, '');
+  return Math.round(parseFloat(numeric) * 100);
+}
+```
+
+---
+
+### `fixtures/checkout.fixture.ts`
+
+```typescript
+import { test as base, expect } from '@playwright/test';
+import { CheckoutPage } from '../pages/CheckoutPage';
+import { CheckoutApiClient } from '../api/checkoutApiClient';
 
 type CheckoutFixtures = {
   checkoutPage: CheckoutPage;
-  mockGatewayAuthorization: (result: GatewayResult) => Promise<void>;
+  checkoutApi: CheckoutApiClient;
 };
 
 /**
- * Shared fixtures for Checkout Payment Regression suite.
- * Centralizes cart setup and gateway mocking so specs never duplicate setup
- * (ISO/IEC 25010 maintainability: no duplicated setup, no order dependence).
- * Each test receives a fresh page/cart — no shared mutable state.
+ * Shared fixtures so specs never repeat navigation/setup boilerplate
+ * (maintainability requirement: no duplicated setup, no order dependence).
+ * Each test gets a fresh CheckoutPage/CheckoutApiClient instance — no
+ * mutable state is shared across tests.
  */
 export const test = base.extend<CheckoutFixtures>({
-  page: async ({ page }, use) => {
-    await page.goto('/cart');
-    await page.getByTestId('add-eligible-item-to-cart').click();
-    await use(page);
-  },
-
   checkoutPage: async ({ page }, use) => {
     const checkoutPage = new CheckoutPage(page);
-    await checkoutPage.goto();
-    await checkoutPage.selectCardPaymentMethod();
+    await checkoutPage.gotoCheckout();
     await use(checkoutPage);
   },
 
-  mockGatewayAuthorization: async ({ page }, use) => {
-    const mock = async (result: GatewayResult) => {
-      await page.route('**/api/payments/authorize', async (route: Route) => {
-        if (result === 'timeout') {
-          await route.abort('timedout');
-          return;
-        }
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ result, orderId: 'test-order' }),
-        });
-      });
-    };
-    await use(mock);
+  checkoutApi: async ({ request }, use) => {
+    await use(new CheckoutApiClient(request));
   },
 });
 
-export { expect } from '@playwright/test';
+export { expect };
 ```
 
-### `tests/checkout-payment-critical-high.spec.ts`
+---
+
+### `tests/checkout-amount-integrity.spec.ts`
+
 ```typescript
-/**
- * Test basis: Approved Scenarios / Approved Cases — Checkout Card Payment,
- * Promo, and Stock Validation Regression.
- * Covers: TC-001, TC-002, TC-003 (Critical), TC-004, TC-005, TC-007 (High).
- * Draft artifact — not approved/signed off. See open items below.
- */
 import { test, expect } from '../fixtures/checkout.fixture';
-import { sandboxCard } from '../fixtures/test-data';
+import { requireEnv } from '../helpers/env';
 
-test.describe('Checkout Card Payment Regression — Critical & High Risk', () => {
-  test('TC-001: order status reflects an approved gateway authorization', async ({
+/**
+ * Covers: TC-001 (critical), TC-009 (critical), TC-008 (medium)
+ * Quality characteristic under test: functional suitability (ISO/IEC 25010) —
+ * amount-integrity accuracy of the checkout payment flow.
+ * Traceability: Scenario 1/7/6 -> R-01, R-01, R-05.
+ */
+
+test.describe('Checkout payment amount integrity', () => {
+  test('TC-001: gateway authorization amount matches displayed cart total after promo + stock recalculation', async ({
     checkoutPage,
-    mockGatewayAuthorization,
+    checkoutApi,
   }) => {
-    await mockGatewayAuthorization('approved');
-    await checkoutPage.fillCardDetails(sandboxCard);
-    await checkoutPage.submitPayment();
+    const promoCode = requireEnv('TEST_PROMO_CODE_VALID');
+    const itemId = requireEnv('TEST_STOCK_ADJUSTABLE_ITEM_ID');
 
-    const status = await checkoutPage.getOrderStatusText();
-    // Literal status string is draft-only — verify against system's order-status enum (open item).
+    await checkoutPage.applyPromoCode(promoCode);
+    await checkoutApi.triggerStockAdjustment(itemId);
+    await checkoutPage.reloadCart();
+
+    const displayedTotalCents = await checkoutPage.getDisplayedTotalCents();
+    await checkoutPage.submitPayment();
+    const orderId = await checkoutPage.getOrderId();
+
+    const authorization = await checkoutApi.getPaymentStatus(orderId);
+
     expect(
-      status,
-      `Expected order status "Confirmed" after an approved gateway authorization, got "${status}"`
-    ).toBe('Confirmed');
+      authorization.amountInCents,
+      `Gateway authorization amount for order ${orderId} must equal the displayed cart total of ${displayedTotalCents} cents to the cent`
+    ).toBe(displayedTotalCents);
   });
 
-  test('TC-002: order is marked payment failed on a declined gateway authorization', async ({
+  test('TC-009: minimum chargeable amount after maximum promo discount is accepted by the gateway', async ({
     checkoutPage,
-    mockGatewayAuthorization,
+    checkoutApi,
   }) => {
-    await mockGatewayAuthorization('declined');
-    await checkoutPage.fillCardDetails(sandboxCard);
-    await checkoutPage.submitPayment();
+    const maxDiscountPromo = requireEnv('TEST_PROMO_CODE_MAX_DISCOUNT');
 
-    const status = await checkoutPage.getOrderStatusText();
+    await checkoutPage.applyPromoCode(maxDiscountPromo);
+    const displayedTotalCents = await checkoutPage.getDisplayedTotalCents();
+
+    await checkoutPage.submitPayment();
+    const orderId = await checkoutPage.getOrderId();
+
+    const authorization = await checkoutApi.getPaymentStatus(orderId);
+
     expect(
-      status,
-      `Expected order status "Payment Failed" after a declined gateway authorization, got "${status}"`
-    ).toBe('Payment Failed');
+      authorization.status,
+      `Gateway authorization for the minimum chargeable amount on order ${orderId} must succeed, got status "${authorization.status}"`
+    ).toBe('authorized');
+
+    expect(
+      authorization.amountInCents,
+      `Authorized amount for order ${orderId} must equal the minimum chargeable total of ${displayedTotalCents} cents displayed in the UI`
+    ).toBe(displayedTotalCents);
   });
 
-  test('TC-003: order is set to pending retry on a gateway timeout, with a retry option offered', async ({
+  test('TC-008: recalculated price after cart change matches UI display and captured payment amount', async ({
     checkoutPage,
-    mockGatewayAuthorization,
+    checkoutApi,
   }) => {
-    await mockGatewayAuthorization('timeout');
-    await checkoutPage.fillCardDetails(sandboxCard);
+    const promoCode = requireEnv('TEST_PROMO_CODE_VALID');
+    const unavailableItemId = requireEnv('TEST_ITEM_BECOMES_UNAVAILABLE_ID');
+
+    await checkoutPage.applyPromoCode(promoCode);
+    await checkoutApi.markItemUnavailable(unavailableItemId);
+    await checkoutPage.reloadCart();
+
+    const recalculatedTotalCents = await checkoutPage.getDisplayedTotalCents();
     await checkoutPage.submitPayment();
+    const orderId = await checkoutPage.getOrderId();
 
-    const status = await checkoutPage.getOrderStatusText();
-    expect(
-      status,
-      `Expected order status "Pending Retry" after a gateway timeout, got "${status}"`
-    ).toBe('Pending Retry');
+    const payment = await checkoutApi.getPaymentStatus(orderId);
 
-    const retryVisible = await checkoutPage.getRetryButtonVisible();
     expect(
-      retryVisible,
-      'Expected a retry option to be offered to the customer after a gateway timeout'
-    ).toBeTruthy();
+      payment.capturedAmountInCents,
+      `Captured amount for order ${orderId} must exactly equal the recalculated total of ${recalculatedTotalCents} cents shown in the UI`
+    ).toBe(recalculatedTotalCents);
+  });
+});
+```
+
+---
+
+### `tests/checkout-lifecycle-security.spec.ts`
+
+```typescript
+import { test, expect } from '../fixtures/checkout.fixture';
+import { requireEnv } from '../helpers/env';
+import { PROVISIONAL_PENDING_FULFILLMENT_REVIEW_STATE } from '../fixtures/test-data';
+
+/**
+ * Covers: TC-002 (critical), TC-006 (high, security), TC-007 (high, security),
+ *         TC-003/TC-004/TC-005 (high, data-driven callback lifecycle)
+ * Quality characteristics under test: functional suitability (lifecycle consistency),
+ * security (data masking, session/authentication handling) per ISO/IEC 25010.
+ * Traceability: Scenario 2/4/5/3 -> R-02, R-03, R-03, R-04.
+ */
+
+test.describe('Order lifecycle consistency and security', () => {
+  test('TC-002: payment stays authorized (not captured) and order enters pending-fulfillment-review when stock depletes mid-authorization', async ({
+    checkoutApi,
+  }) => {
+    const itemId = requireEnv('TEST_LIMITED_STOCK_ITEM_ID');
+
+    const { orderId } = await checkoutApi.initiatePaymentAuthorization(itemId);
+
+    // Simulates a concurrent transaction depleting stock before authorization completes.
+    await checkoutApi.depleteStock(itemId);
+
+    const paymentStatus = await checkoutApi.getPaymentStatus(orderId);
+    expect(
+      paymentStatus.status,
+      `Order ${orderId} payment must remain "authorized" and must not be auto-captured when stock depletes mid-authorization`
+    ).toBe('authorized');
+
+    const order = await checkoutApi.getOrderStatus(orderId);
+    expect(
+      order.stockHoldReleased,
+      `Stock hold for item ${itemId} must be released once authorization completes without capture`
+    ).toBe(true);
+
+    expect(
+      order.status,
+      `Order ${orderId} status must not be "confirmed" when payment was not captured due to stock depletion`
+    ).not.toBe('confirmed');
+
+    // Provisional label per TC-002 / Scenario 2 — the exact state name is TBD pending
+    // confirmation of the stock validation timing model (see Test Plan open items).
+    // Update this assertion once that model is confirmed.
+    expect(
+      order.status,
+      `Order ${orderId} status is expected to be the provisional "${PROVISIONAL_PENDING_FULFILLMENT_REVIEW_STATE}" state (label TBD — revisit once confirmed)`
+    ).toBe(PROVISIONAL_PENDING_FULFILLMENT_REVIEW_STATE);
   });
 
-  test('TC-004: payment authorization is reversed when the last locked unit sells out before capture', async ({
-    page,
-    checkoutPage,
-    mockGatewayAuthorization,
+  test('TC-006: decline response masks card data to first6/last4 and omits CVV from response and logs', async ({
+    checkoutApi,
   }) => {
-    await mockGatewayAuthorization('approved');
+    const declineCardNumber = requireEnv('TEST_CARD_DECLINE_NUMBER');
+    const declineCardCvv = requireEnv('TEST_CARD_DECLINE_CVV');
+    const first6 = declineCardNumber.slice(0, 6);
+    const last4 = declineCardNumber.slice(-4);
 
-    // Simulate the locked item's last unit going out of stock before capture completes.
-    await page.route('**/api/inventory/stock-check', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ inStock: false }),
-      })
-    );
-
-    await checkoutPage.fillCardDetails(sandboxCard);
-    await checkoutPage.submitPayment();
-
-    const status = await checkoutPage.getOrderStatusText();
-    // Literal status string is draft-only — verify against system's order-status enum (open item).
-    expect(
-      status,
-      `Expected order status to reflect the order could not be fulfilled, got "${status}"`
-    ).toBe('Could Not Be Fulfilled');
-  });
-
-  test('TC-005: CVV and card number are masked across the checkout journey', async ({
-    page,
-    checkoutPage,
-    mockGatewayAuthorization,
-  }) => {
-    await mockGatewayAuthorization('approved');
-
-    const responseBodies: string[] = [];
-    page.on('response', async (response) => {
-      try {
-        responseBodies.push(await response.text());
-      } catch {
-        // Non-text bodies (e.g. binary assets) are not relevant to CVV/PAN exposure checks.
-      }
+    const response = await checkoutApi.submitDeclinedCardPayment({
+      cardNumber: declineCardNumber,
+      cvv: declineCardCvv,
     });
+    const body = await response.json();
 
-    await checkoutPage.fillCardDetails(sandboxCard);
-    await checkoutPage.submitPayment();
+    expect(body.cardDisplay, 'Decline response must include a masked card display field').toBeDefined();
 
-    for (const body of responseBodies) {
+    expect(
+      String(body.cardDisplay).startsWith(first6),
+      `Masked card display "${body.cardDisplay}" must start with the first six digits of the card`
+    ).toBe(true);
+
+    expect(
+      String(body.cardDisplay).endsWith(last4),
+      `Masked card display "${body.cardDisplay}" must end with the last four digits of the card`
+    ).toBe(true);
+
+    expect(
+      String(body.cardDisplay).replace(/\D/g, '').length,
+      'Masked card display must not expose the full PAN length'
+    ).toBeLessThan(declineCardNumber.length);
+
+    const bodyText = JSON.stringify(body);
+    expect(bodyText.includes(declineCardCvv), 'Decline response body must not contain the CVV value').toBe(false);
+
+    expect(body.transactionId, 'Decline response must include a transactionId to look up its log entry').toBeDefined();
+
+    const log = await checkoutApi.getTransactionLog(body.transactionId);
+    const logText = JSON.stringify(log);
+
+    expect(logText.includes(declineCardNumber), 'Application log must not contain the full card number').toBe(false);
+    expect(logText.includes(declineCardCvv), 'Application log must not contain the CVV').toBe(false);
+  });
+
+  test('TC-007: expired session token is rejected on payment submission', async ({ checkoutApi }) => {
+    const expiredToken = requireEnv('TEST_EXPIRED_SESSION_TOKEN');
+    const orderId = requireEnv('TEST_ORDER_ID_FOR_EXPIRED_TOKEN');
+
+    const response = await checkoutApi.submitPaymentWithToken(orderId, expiredToken);
+
+    expect(
+      [401, 403].includes(response.status()),
+      `Expired session token must be rejected with an authentication error (401/403), got ${response.status()} (exact code TBD per Approved Cases)`
+    ).toBe(true);
+
+    const order = await checkoutApi.getOrderStatus(orderId);
+    expect(
+      order.paymentAuthorizationId,
+      `No payment authorization should be created for order ${orderId} when the request is rejected due to an expired token`
+    ).toBeUndefined();
+  });
+
+  const callbackCases = [
+    { callbackStatus: 'success' as const, expectedState: 'confirmed' },
+    { callbackStatus: 'failure' as const, expectedState: 'payment_failed' },
+    { callbackStatus: 'timeout' as const, expectedState: 'pending_retry' },
+  ];
+
+  for (const { callbackStatus, expectedState } of callbackCases) {
+    test(`TC-003/004/005: gateway callback "${callbackStatus}" transitions order to "${expectedState}"`, async ({
+      checkoutApi,
+    }) => {
+      // Each iteration creates its own order — no shared mutable state between cases.
+      const { orderId } = await checkoutApi.createOrderAwaitingCallback();
+
+      await checkoutApi.sendGatewayCallback(orderId, callbackStatus);
+
+      const order = await checkoutApi.getOrderStatus(orderId);
       expect(
-        body,
-        'CVV value must never appear in any API response payload during checkout'
-      ).not.toContain(sandboxCard.cvv);
-    }
-
-    const displayedCard = await checkoutPage.getDisplayedCardNumber();
-    const first6 = sandboxCard.number.slice(0, 6);
-    const last4 = sandboxCard.number.slice(-4);
-    expect(
-      displayedCard,
-      `Expected the displayed card number to show only first 6 and last 4 digits, got "${displayedCard}"`
-    ).toBe(`${first6}******${last4}`);
-    expect(
-      displayedCard,
-      'Full unmasked card number must never be shown in the UI'
-    ).not.toContain(sandboxCard.number);
-  });
-
-  test('TC-007: retrying a card payment after a network timeout results in exactly one capture', async ({
-    page,
-    checkoutPage,
-  }) => {
-    // Provisional per Test Plan blocker — idempotency-key mechanism is not yet confirmed.
-    let gatewayCallCount = 0;
-    const idempotencyKeysSeen = new Set<string>();
-
-    await page.route('**/api/payments/authorize', async (route, request) => {
-      gatewayCallCount++;
-      const key = await request.headerValue('Idempotency-Key');
-      if (key) idempotencyKeysSeen.add(key);
-
-      if (gatewayCallCount === 1) {
-        await route.abort('timedout');
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ result: 'approved', orderId: 'test-order' }),
-      });
+        order.status,
+        `Order ${orderId} should transition to "${expectedState}" after a "${callbackStatus}" gateway callback, got "${order.status}"`
+      ).toBe(expectedState);
     });
-
-    await checkoutPage.fillCardDetails(sandboxCard);
-    await checkoutPage.submitPayment(); // initial attempt times out
-    await checkoutPage.submitPayment(); // customer retries the identical payment
-
-    expect(
-      idempotencyKeysSeen.size,
-      `Expected the retry to reuse the same Idempotency-Key as the original attempt ` +
-        `(provisional — pending confirmation of idempotency mechanism, Test Plan blocker), ` +
-        `got ${idempotencyKeysSeen.size} distinct key(s)`
-    ).toBe(1);
-
-    const captureCount = await checkoutPage.getCaptureCountText();
-    expect(
-      captureCount,
-      `Expected exactly one capture recorded against the order after retry, got "${captureCount}"`
-    ).toBe('1');
-  });
+  }
 });
 ```
 
-### `tests/checkout-payment-medium.spec.ts`
-```typescript
-/**
- * Test basis: Approved Scenarios / Approved Cases — Checkout Card Payment,
- * Promo, and Stock Validation Regression.
- * Covers: TC-006, TC-008 (Medium), TC-009, TC-010, TC-011 (Medium/Boundary).
- * Draft artifact — not approved/signed off. See open items below.
- */
-import { test, expect } from '../fixtures/checkout.fixture';
-import {
-  sandboxCard,
-  testPromoCode,
-  recalculatedCartTotalFixture,
-  promoMinCartValue,
-} from '../fixtures/test-data';
+---
 
-test.describe('Checkout Card Payment Regression — Medium Risk', () => {
-  test('TC-006: payment submission is rejected when CVV contains invalid characters', async ({
-    page,
-    checkoutPage,
-  }) => {
-    let gatewayWasCalled = false;
-    await page.route('**/api/payments/authorize', (route) => {
-      gatewayWasCalled = true;
-      route.continue();
-    });
+## Assumptions & open items carried forward (not resolved by this pass)
 
-    await checkoutPage.fillCardDetails({ ...sandboxCard, cvv: '12a' });
-    await checkoutPage.submitPayment();
+- **Assumed API contract:** `/test-support/...` endpoints in `checkoutApiClient.ts` are an assumed sandbox test-orchestration surface (stock manipulation, gateway callback simulation, log lookup). Confirm the real contract with the API team before execution — TBD.
+- **UI selectors:** no Recorded Baseline was supplied, so `data-testid` names in `CheckoutPage.ts` are the automation's own naming, not verified against a real DOM. Reconcile on first run.
+- **TC-002 state label:** `PROVISIONAL_PENDING_FULFILLMENT_REVIEW_STATE` reproduces the illustrative label from the Approved Cases artifact; it is explicitly flagged TBD pending the stock validation timing model decision.
+- **TC-007 status code:** asserted as 401 or 403; exact expected code was marked "not specified" in the Approved Cases artifact.
+- **Required env vars** (must be provided by the sandbox test environment; never hardcode): `TEST_PROMO_CODE_VALID`, `TEST_PROMO_CODE_MAX_DISCOUNT`, `TEST_STOCK_ADJUSTABLE_ITEM_ID`, `TEST_ITEM_BECOMES_UNAVAILABLE_ID`, `TEST_LIMITED_STOCK_ITEM_ID`, `TEST_CARD_DECLINE_NUMBER`, `TEST_CARD_DECLINE_CVV`, `TEST_EXPIRED_SESSION_TOKEN`, `TEST_ORDER_ID_FOR_EXPIRED_TOKEN`.
+- **Coverage gap already flagged at the Cases stage** (not closed here, per instruction not to invent scope): no negative/tamper-input test exists for the Payment Amount Integrity area — pending the "promo validation location (client/server)" TBD from the Scenarios artifact.
 
-    const message = await checkoutPage.getValidationMessageText();
-    expect(
-      message,
-      `Expected a generic invalid-CVV validation message, got "${message}"`
-    ).toMatch(/invalid cvv/i);
-    expect(
-      message,
-      'Validation message must not leak stack traces, error codes, or system detail'
-    ).not.toMatch(/stack|exception|trace|error code/i);
-    expect(
-      gatewayWasCalled,
-      'Payment with an invalid CVV must be rejected client-side and never reach the gateway'
-    ).toBeFalsy();
-  });
+## Not implemented in this pass
 
-  test('TC-008: bank debit matches recalculated cart total after a price change with promo applied', async ({
-    page,
-    checkoutPage,
-    mockGatewayAuthorization,
-  }) => {
-    await checkoutPage.applyPromoCode(testPromoCode);
-
-    // Simulate the recalculated total (promo discount + updated item price) that the
-    // cart service would return after a price change occurs before capture.
-    await page.route('**/api/cart/total', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ total: recalculatedCartTotalFixture }),
-      })
-    );
-
-    await mockGatewayAuthorization('approved');
-    await checkoutPage.fillCardDetails(sandboxCard);
-    await checkoutPage.submitPayment();
-
-    const displayedTotal = await checkoutPage.getCartTotalText();
-    const debitedAmount = await checkoutPage.getDebitedAmountText();
-
-    expect(
-      debitedAmount,
-      `Expected the debited amount to equal the recalculated cart total "${displayedTotal}", got "${debitedAmount}"`
-    ).toBe(displayedTotal);
-  });
-
-  test('TC-009: promo is rejected when cart total is one unit below the minimum eligible value', async ({
-    page,
-    checkoutPage,
-  }) => {
-    test.skip(
-      promoMinCartValue === undefined,
-      'PROMO_MIN_CART_VALUE not configured — threshold is TBD pending business-rule confirmation (Test Plan blocker)'
-    );
-    const belowThreshold = promoMinCartValue! - 1;
-    await page.route('**/api/cart/total', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ total: belowThreshold }),
-      })
-    );
-
-    await checkoutPage.applyPromoCode(testPromoCode);
-    const message = await checkoutPage.getPromoResultMessage();
-    expect(
-      message,
-      `Expected a promo-rejection message when cart total (${belowThreshold}) is below the minimum eligible value, got "${message}"`
-    ).toMatch(/minimum/i);
-  });
-
-  test('TC-010: promo is applied when cart total is exactly at the minimum eligible value', async ({
-    page,
-    checkoutPage,
-  }) => {
-    test.skip(
-      promoMinCartValue === undefined,
-      'PROMO_MIN_CART_VALUE not configured — threshold is TBD pending business-rule confirmation (Test Plan blocker)'
-    );
-    await page.route('**/api/cart/total', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ total: promoMinCartValue }),
-      })
-    );
-
-    await checkoutPage.applyPromoCode(testPromoCode);
-    const totalText = await checkoutPage.getCartTotalText();
-    expect(
-      totalText,
-      `Expected the promo discount to be applied and reflected in the cart total when total is exactly at the minimum (${promoMinCartValue}), got "${totalText}"`
-    ).not.toBe(String(promoMinCartValue));
-  });
-
-  test('TC-011: promo is applied when cart total is one unit above the minimum eligible value', async ({
-    page,
-    checkoutPage,
-  }) => {
-    test.skip(
-      promoMinCartValue === undefined,
-      'PROMO_MIN_CART_VALUE not configured — threshold is TBD pending business-rule confirmation (Test Plan blocker)'
-    );
-    const aboveThreshold = promoMinCartValue! + 1;
-    await page.route('**/api/cart/total', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ total: aboveThreshold }),
-      })
-    );
-
-    await checkoutPage.applyPromoCode(testPromoCode);
-    const totalText = await checkoutPage.getCartTotalText();
-    expect(
-      totalText,
-      `Expected the promo discount to be applied and reflected in the cart total when total is one unit above the minimum (${aboveThreshold}), got "${totalText}"`
-    ).not.toBe(String(aboveThreshold));
-  });
-});
-```
-
-## Open items carried into this pass (unresolved, per tester review notes)
-- **TC-001/002/003/004**: literal order-status strings (`Confirmed`, `Payment Failed`, `Pending Retry`, `Could Not Be Fulfilled`) are draft values — confirm against the system's actual order-status enum before treating a failing assertion as a defect rather than a wrong expectation.
-- **TC-007**: idempotency-key assertion is provisional per the Test Plan blocker; treat results as pending until the mechanism is confirmed.
-- **TC-009/010/011**: skip automatically unless `PROMO_MIN_CART_VALUE` is configured — the real threshold is TBD.
-- **Selectors**: no Recorded Baseline was supplied this session, so all `data-testid` names in `pages/checkout-page.ts` are placeholders inferred from the scenario language — confirm against actual markup on first run.
-- Required env vars to configure before running: `SANDBOX_CARD_NUMBER`, `SANDBOX_CARD_EXPIRY`, `SANDBOX_CARD_CVV`, `TEST_PROMO_CODE`, `TEST_RECALCULATED_CART_TOTAL`, and optionally `PROMO_MIN_CART_VALUE`.
-
-This is a draft automation artifact for tester review — it has not been approved or signed off.
+None — all 9 approved test cases (TC-001–TC-009) are implemented above within the 9-test / 2-file footprint.
