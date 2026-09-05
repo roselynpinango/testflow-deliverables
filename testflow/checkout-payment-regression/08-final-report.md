@@ -4,11 +4,11 @@
 
 ## Executive Summary
 
+No test execution log or run evidence was supplied for this cycle — the Automate artifact contains draft Playwright specs (`test.skip`/`test.fixme` guards for unconfigured sandbox data), but no CI run output or pass/fail results were provided against them. Consequently pass rate, defect count, and per-area results below reflect **zero executed test cases**, not a defect-free system (ISTQB: absence of evidence is not evidence of absence). Three of nine designed test cases (TC-002, TC-003, TC-004) remain non-executable `fixme` placeholders pending sandbox promo-rate data. Risk status is Red: the plan's own entry criteria (sandbox availability, order-of-operations documentation) are still open blockers, meaning test design/execution should not be considered validated this cycle.
+
 | Pass Rate | Bugs Found | Risk Status |
 |-----------|-----------|-------------|
-| Not measured (0/10 executed) | 0 logged (0 critical) | 🔴 Red |
-
-No execution log, run artifact, or defect log was supplied in the provided context — the automate artifact confirms all 10 approved test cases (TC-001–TC-010) exist as drafted specs with `Status: Pending` and have not yet run against a live or CI environment. Consequently pass rate and defect counts cannot be reported as measured facts; they are marked unknown/zero-by-absence-of-evidence rather than asserted as passing. Multiple open blockers (unconfirmed selectors, endpoint paths, sandbox credentials) also mean the suite is not yet execution-ready. Risk status is Red because the quality gate cannot be evaluated with confidence in this state.
+| Unknown (0/9 executed — no run evidence supplied) | 0 logged (not measured — no execution occurred) | 🔴 Red |
 
 ---
 
@@ -16,35 +16,45 @@ No execution log, run artifact, or defect log was supplied in the provided conte
 
 | Area | Executed | Passed | Failed | Skipped | Notes |
 |------|----------|--------|--------|---------|-------|
-| Payment Amount Integrity (TC-001, TC-004, TC-005) | 0 | 0 | 0 | 0 | No run log provided; specs drafted only, `test.skip` guards active pending sandbox env vars (TBD). |
-| Order-Payment State Consistency (TC-002) | 0 | 0 | 0 | 0 | No run log provided; depends on unconfirmed capture/stock-check endpoint patterns (TBD). |
-| Security & Input Validation (TC-003, TC-006, TC-007) | 0 | 0 | 0 | 0 | No run log provided; TC-006 additionally blocked by unconfirmed `PROMO_CODE_MAX_LENGTH` (TBD). CVV log-audit portion of TC-003 explicitly out of UI-automation reach per automate artifact. |
-| Promo Code Logic (TC-008, TC-009, TC-010) | 0 | 0 | 0 | 0 | No run log provided; TC-008/TC-009 gated by promo code env vars not yet confirmed available (TBD). |
+| Promo Discount / Amount Integrity (R-01) — TC-001–004 | 0 | 0 | 0 | 0 | No run log supplied. TC-001 has a coded assertion but no execution result; TC-002/003/004 are `test.fixme` placeholders — not runnable (percentage/fixed/stacked promo rates marked TBD in test basis) |
+| Stock/Payment State Consistency (R-02) — TC-005 | 0 | 0 | 0 | 0 | Coded, requires `SANDBOX_RESERVED_ITEM_ID` — no run evidence supplied |
+| Card Data Non-Exposure (R-03) — TC-006 | 0 | 0 | 0 | 0 | Coded, requires `SANDBOX_DECLINE_CARD_NUMBER` — no run evidence supplied |
+| Idempotent Retry (R-04) — TC-007 | 0 | 0 | 0 | 0 | Coded, requires `SANDBOX_TIMEOUT_CARD_NUMBER` — no run evidence supplied |
+| Promo Input Validation (R-05) — TC-008, TC-009 | 0 | 0 | 0 | 0 | Coded and does not depend on sandbox env vars, but no run evidence supplied this cycle |
 
-**Total scenarios in suite:** 10. **Total executed:** 0 — no execution evidence (log, CI run, or manual record) was supplied for this cycle.
+*Executed/Passed/Failed/Skipped counts are unknown per artifact evidence, not asserted as zero-defect; shown as 0 because no execution log exists to populate these fields (TMMi evidence rule).*
 
 ---
 
 ## Defect Summary
 
-No defects are logged against any artifact supplied for this cycle.
+No defect records were supplied in any artifact for this cycle (no bug tracker export, log, or run report provided). Bug severity distribution cannot be quantified from measured evidence:
 
-**Severity distribution:** Critical: 0 · High: 0 · Medium: 0 · Low: 0 (total: 0)
+| Severity | Count |
+|----------|-------|
+| Critical | 0 (not measured) |
+| High | 0 (not measured) |
+| Medium | 0 (not measured) |
+| Low | 0 (not measured) |
+| **Total** | **0 (not measured)** |
 
-This reflects absence of execution, not verified absence of defects — per the testing principle that testing shows the presence of defects, not their absence, a suite that has not run cannot be cited as evidence of a defect-free system.
+No defect table rows are populated — fabricating IDs, titles, or ticket references without source evidence is prohibited (ISO/IEC 42001).
 
 ---
 
 ## Quality Gate Verdict
 
+Graded against the "Approved Exit Criteria" (EN-1–EN-3) supplied in the Test-context artifact, matched verbatim to the Plan's Entry Criteria wording:
+
 | DoD Criterion | Target | Actual | Verdict |
 |---------------|--------|--------|---------|
-| Scenario pass rate on the critical path (payment amount integrity + order/payment state consistency scenarios) | >= 95% | No execution evidence — 0 of 4 critical-path scenarios (TC-001, TC-002, TC-004, TC-005) have a recorded run | Unknown |
-| Open Critical or High severity defects at sign-off | 0 | 0 logged, but zero execution occurred — count cannot be treated as verified evidence of defect-free state | Unknown |
-| Planned security scenarios (CVV masking, promo/payment field input validation) executed | 100% of planned security scenarios executed | 0 of 3 planned security scenarios (TC-003, TC-006, TC-007) executed | Not met |
-| Regression suite pass rate on existing checkout flows | >= 90% | No regression run evidence supplied for this cycle | Unknown |
+| Sandbox/test bank credentials and gateway test environment available | Confirmed available | Plan's Blockers list this item as still open (Owner: TBD, needed by: TBD); Automate fixtures throw/skip when `GATEWAY_SANDBOX_API_URL` and card env vars are unset — no confirmation of availability supplied | Not met |
+| Order-of-operations for stock revalidation vs. promo vs. capture documented | Confirmed / documented before test design starts | Plan's Blockers list this item as still open (Owner: TBD, needed by: TBD); no documentation artifact was supplied | Not met |
+| Test basis (card payment, promo code, stock validation requirements) reviewed and baselined | Sign-off obtained from test basis owner | Every artifact in this cycle (Scenarios, Cases, Plan, Automate) is explicitly labeled "draft, pending tester review" / "not an approval" — no sign-off evidence exists | Not met |
 
-**Overall: FAIL** — three of four exit criteria cannot be confirmed as met (two Unknown, one Not met), and one is a definitive miss. Release sign-off cannot be supported on the evidence available.
+**Overall: FAIL**
+
+*Note: the Plan's own Definition of Done (EC-1–EC4, e.g. ≥90% critical-path pass rate) could not be graded at all — no execution evidence exists to measure pass rate, open defects, security-scenario completion, or risk-register coverage against it. Per the no-fabrication rule this is flagged as an omission risk below rather than scored.*
 
 ---
 
@@ -52,13 +62,13 @@ This reflects absence of execution, not verified absence of defects — per the 
 
 | Risk | Untested Area | Reason Skipped |
 |------|--------------|----------------|
-| Suite selectors unverified against real markup | All 10 test cases (`CheckoutPage.ts` locators) | No recorded baseline supplied; `data-testid` values are conventional placeholders, not confirmed (per automate artifact) |
-| Gateway/capture/stock-check API paths unconfirmed | TC-001, TC-002, TC-004, TC-005 (amount integrity, state consistency) | Exact endpoint routes not in test basis — marked TBD in `paymentGateway.ts` / `stockSimulation.ts` |
-| Sandbox bank credentials and promo codes availability unconfirmed | TC-001, TC-002–TC-005, TC-003, TC-008, TC-009 | Env vars (`SANDBOX_CARD_*`, `PROMO_CODE_ACTIVE`, `PROMO_CODE_EXPIRED`, `PROMO_CODE_SECOND_VALID`) not confirmed available for this cycle — open blocker carried from plan stage |
-| Promo code maximum length undefined | TC-006 (oversized promo boundary test) | `PROMO_CODE_MAX_LENGTH` not specified in test basis; test currently `test.skip`s without this value |
-| CVV absence in application logs not verifiable via UI automation | TC-003 (backend log leakage) | Playwright UI/API reach cannot inspect server-side logs; a separate backend log audit is required and is not covered by this suite |
-| Promo stacking vs. last-item stock pricing interaction rule unclear | TC-009 and related stock+promo combination logic | Business rule not confirmed in test basis (open blocker, owner TBD) |
-| Expected system behavior on stock depletion between authorization and capture unclear | TC-002 | Behavior not explicitly confirmed by a stakeholder; test asserts an assumed reversal/consistency contract pending confirmation |
+| Amount integrity for percentage/fixed-amount/stacked promos (R-01) unverified | TC-002, TC-003, TC-004 | Sandbox promo rates and expected discounted totals were never supplied in the test basis; implemented only as `test.fixme` placeholders |
+| Entry criteria unresolved may invalidate any future execution against unconfirmed environment | EN-1: sandbox/gateway environment confirmation | Blocker open since Plan stage, owner/date still TBD |
+| Stock-vs-promo-vs-capture sequencing behavior unknown, risking incorrect test design | EN-2: order-of-operations documentation | Blocker open since Plan stage, owner/date still TBD |
+| No sign-off exists on the test basis itself, so scope could still shift | EN-3: test basis baseline sign-off | All artifacts remain in draft status pending tester review |
+| Draft locator names (`data-testid`) in `checkout-page.ts` unconfirmed against live markup | All 9 coded test cases (execution reliability) | No Recorded Baseline was supplied to confirm selectors before first run |
+| Gateway sandbox API endpoint paths in `payment-gateway-sandbox.ts` are draft assumptions | All API-dependent assertions (TC-001, TC-005, TC-006, TC-007) | No confirmed sandbox API contract supplied |
+| Saved/tokenized card flows, refunds, chargebacks, non-card payment methods, settlement/reconciliation remain fully untested | All areas outside stated scope | Explicitly out of scope per Brainstorm and Plan "Not in Scope" sections this cycle |
 
 ---
 
@@ -66,14 +76,14 @@ This reflects absence of execution, not verified absence of defects — per the 
 
 | Stage | Input Tokens | Output Tokens | Cache Hits | Cost (USD) |
 |-------|-------------|---------------|------------|-----------|
-| Brainstorm | 127 | 2,624 | 0 | $0.0397 |
-| Plan | 1,676 | 4,791 | 0 | $0.0769 |
-| Scenarios | 4,455 | 11,043 | 0 | $0.1790 |
-| Cases | 2,091 | 5,306 | 0 | $0.0859 |
-| Automate | 4,082 | 17,484 | 0 | $0.2745 |
-| Report | not measured (cost not available until this stage completes) | — | — | — |
-| **Total (measured stages only)** | **12,431** | **41,248** | **0** | **$0.6560** |
+| Brainstorm | 127 | 2,485 | 0 | $0.0377 |
+| Plan | 1,664 | 5,068 | 0 | $0.0810 |
+| Scenarios | 4,329 | 13,465 | 0 | $0.2150 |
+| Cases | 1,911 | 4,816 | 0 | $0.0780 |
+| Automate | 4,545 | 12,750 | 0 | $0.2049 |
+| Report | not measured | not measured | not measured | not measured |
+| **Total (excl. Report)** | **12,576** | **38,584** | **0** | **$0.6165** |
 
 ---
 
-_Generated by TestFlowAssistant — Stage: Report. This is a draft for tester review; it is not an approved or authoritative artifact until a human signs off._
+_Generated by TestFlowAssistant — Stage: Report. This is a draft for tester review; no field in this report constitutes approval, sign-off, or an authoritative release decision — a human tester must review and decide._
