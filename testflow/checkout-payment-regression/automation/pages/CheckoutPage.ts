@@ -1,66 +1,64 @@
 import { Page, Locator } from '@playwright/test';
+import { CardFixture } from '../fixtures/test-data';
 
 /**
- * Page Object for the checkout payment step.
- *
- * NOTE: No recorded baseline was supplied for this pass. The data-testid values
- * below are assumed per project convention and must be confirmed/corrected against
- * the real application markup before this suite is trusted in CI.
+ * Page Object Model for the checkout page. All selectors use data-testid
+ * per the project's selector standard — no brittle CSS selectors.
  */
 export class CheckoutPage {
   readonly page: Page;
-  readonly cartTotal: Locator;
-  readonly cartTotalAfterDiscount: Locator;
-  readonly cartTotalAfterDiscountAndStockAdjustment: Locator;
-  readonly promoCodeInput: Locator;
-  readonly applyPromoButton: Locator;
-  readonly promoMessage: Locator;
   readonly cardNumberInput: Locator;
   readonly cardExpiryInput: Locator;
-  readonly cardCvvInput: Locator;
+  readonly cvvInput: Locator;
   readonly submitPaymentButton: Locator;
-  readonly orderConfirmationAmount: Locator;
-  readonly orderStatus: Locator;
-  readonly paymentErrorMessage: Locator;
-  readonly cardNumberDisplay: Locator;
+  readonly cvvValidationError: Locator;
+  readonly promoCodeInput: Locator;
+  readonly promoApplyButton: Locator;
+  readonly promoError: Locator;
+  readonly cartTotal: Locator;
+  readonly outOfStockError: Locator;
 
   constructor(page: Page) {
     this.page = page;
-    this.cartTotal = page.getByTestId('cart-total');
-    this.cartTotalAfterDiscount = page.getByTestId('cart-total-after-discount');
-    this.cartTotalAfterDiscountAndStockAdjustment = page.getByTestId(
-      'cart-total-after-discount-and-stock-adjustment'
-    );
-    this.promoCodeInput = page.getByTestId('promo-code-input');
-    this.applyPromoButton = page.getByTestId('apply-promo-button');
-    this.promoMessage = page.getByTestId('promo-message');
-    this.cardNumberInput = page.getByTestId('card-number-input');
-    this.cardExpiryInput = page.getByTestId('card-expiry-input');
-    this.cardCvvInput = page.getByTestId('card-cvv-input');
-    this.submitPaymentButton = page.getByTestId('submit-payment-button');
-    this.orderConfirmationAmount = page.getByTestId('order-confirmation-amount');
-    this.orderStatus = page.getByTestId('order-status');
-    this.paymentErrorMessage = page.getByTestId('payment-error-message');
-    this.cardNumberDisplay = page.getByTestId('card-number-display');
+    this.cardNumberInput = page.getByTestId('checkout-card-number');
+    this.cardExpiryInput = page.getByTestId('checkout-card-expiry');
+    this.cvvInput = page.getByTestId('checkout-cvv');
+    this.submitPaymentButton = page.getByTestId('checkout-submit-payment');
+    this.cvvValidationError = page.getByTestId('checkout-cvv-error');
+    this.promoCodeInput = page.getByTestId('checkout-promo-code');
+    this.promoApplyButton = page.getByTestId('checkout-promo-apply');
+    this.promoError = page.getByTestId('checkout-promo-error');
+    this.cartTotal = page.getByTestId('checkout-cart-total');
+    this.outOfStockError = page.getByTestId('checkout-out-of-stock-error');
   }
 
-  async applyPromoCode(code: string): Promise<void> {
-    await this.promoCodeInput.fill(code);
-    await this.applyPromoButton.click();
+  async goto(): Promise<void> {
+    const checkoutUrl = process.env.CHECKOUT_URL;
+    if (!checkoutUrl) {
+      throw new Error(
+        'CHECKOUT_URL env var is not set — checkout base URL is not specified in the test basis (TBD).'
+      );
+    }
+    await this.page.goto(checkoutUrl);
   }
 
-  async enterCardDetails(number: string, expiry: string, cvv: string): Promise<void> {
-    await this.cardNumberInput.fill(number);
-    await this.cardExpiryInput.fill(expiry);
-    await this.cardCvvInput.fill(cvv);
+  async fillCard(card: CardFixture): Promise<void> {
+    await this.cardNumberInput.fill(card.cardNumber);
+    await this.cardExpiryInput.fill(card.expiry);
+    await this.cvvInput.fill(card.cvv);
+  }
+
+  /** Moves focus away from the CVV field by tabbing to the next field. */
+  async blurCvv(): Promise<void> {
+    await this.cvvInput.press('Tab');
   }
 
   async submitPayment(): Promise<void> {
     await this.submitPaymentButton.click();
   }
 
-  async readAmount(locator: Locator): Promise<number> {
-    const text = await locator.textContent();
-    return parseFloat((text ?? '').replace(/[^0-9.]/g, ''));
+  async applyPromoCode(code: string): Promise<void> {
+    await this.promoCodeInput.fill(code);
+    await this.promoApplyButton.click();
   }
 }

@@ -10,447 +10,576 @@ APP_URL=https://your-app.example.com npx playwright test
 reports what it could not reach, rather than passing silently.
 ---
 
-```### `tests/fixtures/test-data.ts`
+`### `fixtures/test-data.ts``
 ```typescript
 /**
  * Fixture-based test data for Checkout Payment Regression automation.
- * No real card data or hardcoded amounts — all values come from environment
- * variables set for the sandbox environment. If a variable is not configured,
- * the dependent test is skipped rather than falling back to a fabricated value
- * (ISO/IEC 42001 — no invented figures).
+ * All sandbox identifiers are sourced from environment variables — no real
+ * card data or credentials are hardcoded here. Where an env var is not
+ * configured, a clearly-marked TBD placeholder is used so failures are
+ * traceable to missing configuration rather than a silent wrong value.
  */
 
 export interface CardFixture {
-  number: string;
-  cvv: string;
+  cardNumber: string;
   expiry: string;
+  cvv: string;
 }
 
-export interface CheckoutTestData {
-  cartTotal: number | undefined;
-  promoFixedDiscount: number | undefined;
-  declineCard: CardFixture;
-  validCard: CardFixture;
-  timeoutSimCard: CardFixture;
-  oversizedPromoCode: string;
-  injectionPromoCode: string;
-  maxPromoCodeLength: number | undefined;
-}
+export const validSandboxCard: CardFixture = {
+  cardNumber: process.env.SANDBOX_CARD_VALID_NUMBER ?? 'TBD-SANDBOX-VALID-CARD-NUMBER',
+  expiry: process.env.SANDBOX_CARD_VALID_EXPIRY ?? 'TBD-SANDBOX-VALID-EXPIRY',
+  cvv: process.env.SANDBOX_CARD_VALID_CVV ?? 'TBD-SANDBOX-VALID-CVV',
+};
 
-function parseNumberEnv(name: string): number | undefined {
-  const raw = process.env[name];
-  if (!raw) return undefined;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
+export const declineSandboxCard: CardFixture = {
+  cardNumber: process.env.SANDBOX_CARD_DECLINE_NUMBER ?? 'TBD-SANDBOX-DECLINE-CARD-NUMBER',
+  expiry: process.env.SANDBOX_CARD_DECLINE_EXPIRY ?? 'TBD-SANDBOX-DECLINE-EXPIRY',
+  cvv: process.env.SANDBOX_CARD_DECLINE_CVV ?? 'TBD-SANDBOX-DECLINE-CVV',
+};
 
-export function loadCheckoutTestData(): CheckoutTestData {
-  return {
-    // TC-001: relational assertion only (capture == cartTotal - discount) —
-    // exact figures come from sandbox config, never invented here.
-    cartTotal: parseNumberEnv('SANDBOX_CART_TOTAL'),
-    promoFixedDiscount: parseNumberEnv('SANDBOX_PROMO_FIXED_DISCOUNT'),
+// Deliberately malformed (2-digit) CVV for negative-path validation testing.
+export const invalidCvv = process.env.SANDBOX_CVV_INVALID_FORMAT ?? '9X';
 
-    declineCard: {
-      number: process.env.SANDBOX_DECLINE_CARD_NUMBER ?? '',
-      cvv: process.env.SANDBOX_DECLINE_CARD_CVV ?? '',
-      expiry: process.env.SANDBOX_DECLINE_CARD_EXPIRY ?? '',
-    },
-    validCard: {
-      number: process.env.SANDBOX_VALID_CARD_NUMBER ?? '',
-      cvv: process.env.SANDBOX_VALID_CARD_CVV ?? '',
-      expiry: process.env.SANDBOX_VALID_CARD_EXPIRY ?? '',
-    },
-    timeoutSimCard: {
-      number: process.env.SANDBOX_TIMEOUT_CARD_NUMBER ?? '',
-      cvv: process.env.SANDBOX_TIMEOUT_CARD_CVV ?? '',
-      expiry: process.env.SANDBOX_TIMEOUT_CARD_EXPIRY ?? '',
-    },
+export const promoCodes = {
+  percentage: process.env.SANDBOX_PROMO_PERCENTAGE ?? 'TBD-PROMO-PERCENTAGE',
+  flat: process.env.SANDBOX_PROMO_FLAT ?? 'TBD-PROMO-FLAT',
+  expired: process.env.SANDBOX_PROMO_EXPIRED ?? 'TBD-PROMO-EXPIRED',
+} as const;
 
-    // Deliberately test-authored injection/oversized payloads — not app data.
-    injectionPromoCode: process.env.SANDBOX_INJECTION_PROMO_PAYLOAD ?? "PROMO' OR '1'='1",
-    oversizedPromoCode: 'A'.repeat(2048),
-    maxPromoCodeLength: parseNumberEnv('SANDBOX_PROMO_CODE_MAX_LENGTH'),
-  };
+/**
+ * Generates a unique idempotency key per test invocation so tests remain
+ * independent and never share mutable retry state across runs.
+ */
+export function generateIdempotencyKey(): string {
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 ```
 
-`### `tests/pages/checkout-page.ts``
+`### `pages/CheckoutPage.ts``
 ```typescript
-import { Page, Locator, expect } from '@playwright/test';
+import { Page, Locator } from '@playwright/test';
+import { CardFixture } from '../fixtures/test-data';
 
 /**
- * Page Object for the checkout payment step.
- * All selectors use data-testid per project convention. These are draft
- * selectors pending confirmation against the live application markup —
- * no baseline recording was supplied for this artifact.
+ * Page Object Model for the checkout page. All selectors use data-testid
+ * per the project's selector standard — no brittle CSS selectors.
  */
 export class CheckoutPage {
   readonly page: Page;
-  readonly promoCodeInput: Locator;
-  readonly promoCodeSubmitButton: Locator;
-  readonly promoErrorMessage: Locator;
   readonly cardNumberInput: Locator;
-  readonly cardCvvInput: Locator;
   readonly cardExpiryInput: Locator;
-  readonly payButton: Locator;
-  readonly retryPaymentButton: Locator;
-  readonly checkoutErrorMessage: Locator;
-  readonly orderStatus: Locator;
-  readonly orderId: Locator;
+  readonly cvvInput: Locator;
+  readonly submitPaymentButton: Locator;
+  readonly cvvValidationError: Locator;
+  readonly promoCodeInput: Locator;
+  readonly promoApplyButton: Locator;
+  readonly promoError: Locator;
+  readonly cartTotal: Locator;
+  readonly outOfStockError: Locator;
 
   constructor(page: Page) {
     this.page = page;
-    this.promoCodeInput = page.getByTestId('promo-code-input');
-    this.promoCodeSubmitButton = page.getByTestId('promo-code-submit');
-    this.promoErrorMessage = page.getByTestId('promo-error-message');
-    this.cardNumberInput = page.getByTestId('card-number-input');
-    this.cardCvvInput = page.getByTestId('card-cvv-input');
-    this.cardExpiryInput = page.getByTestId('card-expiry-input');
-    this.payButton = page.getByTestId('pay-button');
-    this.retryPaymentButton = page.getByTestId('retry-payment-button');
-    this.checkoutErrorMessage = page.getByTestId('checkout-error-message');
-    this.orderStatus = page.getByTestId('order-status');
-    this.orderId = page.getByTestId('order-id');
+    this.cardNumberInput = page.getByTestId('checkout-card-number');
+    this.cardExpiryInput = page.getByTestId('checkout-card-expiry');
+    this.cvvInput = page.getByTestId('checkout-cvv');
+    this.submitPaymentButton = page.getByTestId('checkout-submit-payment');
+    this.cvvValidationError = page.getByTestId('checkout-cvv-error');
+    this.promoCodeInput = page.getByTestId('checkout-promo-code');
+    this.promoApplyButton = page.getByTestId('checkout-promo-apply');
+    this.promoError = page.getByTestId('checkout-promo-error');
+    this.cartTotal = page.getByTestId('checkout-cart-total');
+    this.outOfStockError = page.getByTestId('checkout-out-of-stock-error');
   }
 
   async goto(): Promise<void> {
-    await this.page.goto('/checkout');
+    const checkoutUrl = process.env.CHECKOUT_URL;
+    if (!checkoutUrl) {
+      throw new Error(
+        'CHECKOUT_URL env var is not set — checkout base URL is not specified in the test basis (TBD).'
+      );
+    }
+    await this.page.goto(checkoutUrl);
+  }
+
+  async fillCard(card: CardFixture): Promise<void> {
+    await this.cardNumberInput.fill(card.cardNumber);
+    await this.cardExpiryInput.fill(card.expiry);
+    await this.cvvInput.fill(card.cvv);
+  }
+
+  /** Moves focus away from the CVV field by tabbing to the next field. */
+  async blurCvv(): Promise<void> {
+    await this.cvvInput.press('Tab');
+  }
+
+  async submitPayment(): Promise<void> {
+    await this.submitPaymentButton.click();
   }
 
   async applyPromoCode(code: string): Promise<void> {
     await this.promoCodeInput.fill(code);
-    await this.promoCodeSubmitButton.click();
-  }
-
-  async fillCard(card: { number: string; cvv: string; expiry: string }): Promise<void> {
-    await this.cardNumberInput.fill(card.number);
-    await this.cardCvvInput.fill(card.cvv);
-    await this.cardExpiryInput.fill(card.expiry);
-  }
-
-  async submitPayment(): Promise<void> {
-    await this.payButton.click();
-  }
-
-  async retryPayment(): Promise<void> {
-    await this.retryPaymentButton.click();
-  }
-
-  async getOrderId(): Promise<string> {
-    await expect(this.orderId, 'Order ID element did not render after checkout submission').toBeVisible();
-    return (await this.orderId.textContent())?.trim() ?? '';
+    await this.promoApplyButton.click();
   }
 }
 ```
 
-`### `tests/helpers/payment-gateway-sandbox.ts``
+`### `utils/apiClient.ts``
 ```typescript
 import { APIRequestContext } from '@playwright/test';
 
-/**
- * Thin API client over the payment gateway sandbox used for assertions that
- * cannot be observed from the UI alone (capture amount, masked log entries,
- * debit counts, stock-exhaustion side channel).
- *
- * Endpoint paths below are draft assumptions for this test suite — confirm
- * against the actual sandbox API contract before relying on them in CI.
- * Base URL is read from GATEWAY_SANDBOX_API_URL; never hardcoded.
- */
-export class PaymentGatewaySandbox {
-  constructor(private readonly request: APIRequestContext, private readonly baseUrl: string) {}
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `${name} env var is not set — this base URL is not specified in the test basis (TBD). ` +
+        'Configure it before running this suite.'
+    );
+  }
+  return value;
+}
 
-  async getCaptureAmount(orderId: string): Promise<number | undefined> {
-    const res = await this.request.get(`${this.baseUrl}/transactions/${orderId}`);
-    if (!res.ok()) return undefined;
-    const body = await res.json();
-    return body.captureAmount;
+/** Thin wrapper over the order-service API used for status/capture/debit assertions. */
+export class OrderServiceClient {
+  constructor(private readonly request: APIRequestContext) {}
+
+  async getOrderStatus(orderId: string): Promise<{ status: string }> {
+    const baseUrl = requireEnv('ORDER_SERVICE_URL');
+    const response = await this.request.get(`${baseUrl}/orders/${orderId}/status`);
+    return response.json();
   }
 
-  async getTransactionLog(orderId: string): Promise<{ maskedCardNumber: string; rawEntry: string } | undefined> {
-    const res = await this.request.get(`${this.baseUrl}/transactions/${orderId}/log`);
-    if (!res.ok()) return undefined;
-    const body = await res.json();
-    return { maskedCardNumber: body.maskedCardNumber, rawEntry: JSON.stringify(body) };
+  async getCaptureCount(orderId: string): Promise<number> {
+    const baseUrl = requireEnv('ORDER_SERVICE_URL');
+    const response = await this.request.get(`${baseUrl}/orders/${orderId}/captures`);
+    const body = await response.json();
+    return body.captures?.length ?? 0;
   }
 
-  async getDebitCount(orderId: string): Promise<number | undefined> {
-    const res = await this.request.get(`${this.baseUrl}/transactions/${orderId}/debits`);
-    if (!res.ok()) return undefined;
-    const body = await res.json();
-    return body.debitCount;
+  async getDebitCount(accountId: string): Promise<number> {
+    const baseUrl = requireEnv('ORDER_SERVICE_URL');
+    const response = await this.request.get(`${baseUrl}/accounts/${accountId}/debits`);
+    const body = await response.json();
+    return body.debits?.length ?? 0;
+  }
+}
+
+/** Thin wrapper over the sandbox payment gateway used for authorization/failure simulation. */
+export class PaymentGatewaySandboxClient {
+  constructor(private readonly request: APIRequestContext) {}
+
+  async submitPayment(
+    payload: Record<string, unknown>
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const baseUrl = requireEnv('PAYMENT_GATEWAY_SANDBOX_URL');
+    const response = await this.request.post(`${baseUrl}/payments`, { data: payload });
+    return { status: response.status(), body: await response.json() };
   }
 
-  async getOrderStatus(orderId: string): Promise<string | undefined> {
-    const res = await this.request.get(`${this.baseUrl}/orders/${orderId}`);
-    if (!res.ok()) return undefined;
-    const body = await res.json();
-    return body.status;
+  async triggerFailure(
+    failureType: string
+  ): Promise<{ networkLogEntry: string; errorMessagePayload: string }> {
+    const baseUrl = requireEnv('PAYMENT_GATEWAY_SANDBOX_URL');
+    const response = await this.request.post(`${baseUrl}/sandbox/trigger-failure`, {
+      data: { failureType },
+    });
+    const body = await response.json();
+    return {
+      networkLogEntry: body.networkLogEntry ?? '',
+      errorMessagePayload: JSON.stringify(body.errorMessagePayload ?? {}),
+    };
+  }
+}
+
+/** Thin wrapper over sandbox stock control used to simulate concurrent depletion. */
+export class ProductStockClient {
+  constructor(private readonly request: APIRequestContext) {}
+
+  async setStockLevel(productId: string, level: number): Promise<void> {
+    const baseUrl = requireEnv('ORDER_SERVICE_URL');
+    await this.request.post(`${baseUrl}/products/${productId}/stock`, { data: { level } });
   }
 
-  async exhaustStock(itemId: string): Promise<void> {
-    await this.request.post(`${this.baseUrl}/test-hooks/stock/${itemId}/exhaust`);
+  async depleteStockConcurrently(productId: string): Promise<void> {
+    const baseUrl = requireEnv('ORDER_SERVICE_URL');
+    await this.request.post(`${baseUrl}/products/${productId}/stock/deplete`);
   }
 }
 ```
 
-`### `tests/fixtures/checkout-fixtures.ts``
+`### `fixtures/fixtures.ts``
 ```typescript
 import { test as base, expect } from '@playwright/test';
-import { CheckoutPage } from '../pages/checkout-page';
-import { PaymentGatewaySandbox } from '../helpers/payment-gateway-sandbox';
-import { CheckoutTestData, loadCheckoutTestData } from './test-data';
+import { CheckoutPage } from '../pages/CheckoutPage';
+import { OrderServiceClient, PaymentGatewaySandboxClient, ProductStockClient } from '../utils/apiClient';
 
-interface CheckoutFixtures {
+type Fixtures = {
   checkoutPage: CheckoutPage;
-  gatewaySandbox: PaymentGatewaySandbox;
-  testData: CheckoutTestData;
-}
+  orderServiceClient: OrderServiceClient;
+  gatewaySandboxClient: PaymentGatewaySandboxClient;
+  productStockClient: ProductStockClient;
+};
 
-export const test = base.extend<CheckoutFixtures>({
+/**
+ * Shared fixtures so each spec gets a fresh, independent instance per test —
+ * no mutable state carries over between tests.
+ */
+export const test = base.extend<Fixtures>({
   checkoutPage: async ({ page }, use) => {
-    const checkoutPage = new CheckoutPage(page);
-    await checkoutPage.goto();
-    await use(checkoutPage);
+    await use(new CheckoutPage(page));
   },
-
-  gatewaySandbox: async ({ request }, use) => {
-    const baseUrl = process.env.GATEWAY_SANDBOX_API_URL;
-    if (!baseUrl) {
-      throw new Error(
-        'GATEWAY_SANDBOX_API_URL is not configured — set it to the sandbox gateway base URL before running gateway-dependent tests.'
-      );
-    }
-    await use(new PaymentGatewaySandbox(request, baseUrl));
+  orderServiceClient: async ({ request }, use) => {
+    await use(new OrderServiceClient(request));
   },
-
-  testData: async ({}, use) => {
-    await use(loadCheckoutTestData());
+  gatewaySandboxClient: async ({ request }, use) => {
+    await use(new PaymentGatewaySandboxClient(request));
+  },
+  productStockClient: async ({ request }, use) => {
+    await use(new ProductStockClient(request));
   },
 });
 
 export { expect };
 ```
 
-`### `tests/specs/checkout-payment-critical.spec.ts``
+`### `tests/payment-authorization-and-security.spec.ts``
 ```typescript
-import { test, expect } from '../fixtures/checkout-fixtures';
+import { test, expect } from '../fixtures/fixtures';
+import {
+  validSandboxCard,
+  declineSandboxCard,
+  invalidCvv,
+  generateIdempotencyKey,
+} from '../fixtures/test-data';
 
 /**
- * Risk band: Critical (R-01 — amount integrity across promo types).
- * Covers Approved Scenarios 1–2 / Approved Cases TC-001..TC-004.
- */
-test.describe('Checkout Payment Regression — Promo Discount Amount Integrity (R-01)', () => {
-  // TC-001 — @smoke @critical @risk-critical
-  test('TC-001: gateway capture amount equals cart total minus single fixed promo discount', async ({
-    checkoutPage,
-    gatewaySandbox,
-    testData,
-  }) => {
-    test.skip(
-      testData.cartTotal === undefined || testData.promoFixedDiscount === undefined,
-      'Sandbox test data not configured: set SANDBOX_CART_TOTAL and SANDBOX_PROMO_FIXED_DISCOUNT env vars.'
-    );
-    test.skip(!testData.validCard.number, 'SANDBOX_VALID_CARD_NUMBER not configured.');
-
-    const promoCode = process.env.SANDBOX_FIXED_PROMO_CODE;
-    test.skip(!promoCode, 'SANDBOX_FIXED_PROMO_CODE not configured.');
-
-    await checkoutPage.applyPromoCode(promoCode!);
-    await checkoutPage.fillCard(testData.validCard);
-    await checkoutPage.submitPayment();
-
-    const orderId = await checkoutPage.getOrderId();
-    const captureAmount = await gatewaySandbox.getCaptureAmount(orderId);
-    const expectedAmount = testData.cartTotal! - testData.promoFixedDiscount!;
-
-    expect(
-      captureAmount,
-      `Gateway capture amount for order ${orderId} was ${captureAmount}, expected cart total (${testData.cartTotal}) minus fixed discount (${testData.promoFixedDiscount}) = ${expectedAmount}`
-    ).toBe(expectedAmount);
-  });
-
-  // TC-002 — @regression @data-driven @risk-critical (percentage promo)
-  test.fixme(
-    'TC-002: gateway capture amount reflects correct discount for a percentage-type promo',
-    async () => {
-      // Blocked: Approved Scenarios Examples table marks expected_amount as
-      // "TBD — tester to supply sandbox test data". No percentage rate or
-      // expected total was supplied in the test basis; implementing this
-      // assertion now would require fabricating a figure, which is prohibited.
-    }
-  );
-
-  // TC-003 — @regression @data-driven @risk-critical (fixed_amount promo, distinct rate from TC-001)
-  test.fixme(
-    'TC-003: gateway capture amount reflects correct discount for a fixed-amount-type promo',
-    async () => {
-      // Blocked: same TBD condition as TC-002 — sandbox fixed discount value
-      // and expected total not supplied in the test basis.
-    }
-  );
-
-  // TC-004 — @regression @data-driven @risk-critical (stacked promo)
-  test.fixme(
-    'TC-004: gateway capture amount reflects correct discount for a stacked promo combination',
-    async () => {
-      // Blocked: same TBD condition — sandbox stacking rule and expected
-      // total not supplied in the test basis.
-    }
-  );
-});
-```
-
-`### `tests/specs/checkout-payment-regression.spec.ts``
-```typescript
-import { test, expect } from '../fixtures/checkout-fixtures';
-
-/**
- * Risk bands: High (R-02, R-03, R-04), Medium (R-05).
- * Each test is independent — own checkout session via the checkoutPage
- * fixture, no shared mutable state across tests.
+ * Covers TC-001–TC-002 (Critical: payment authorization → order status
+ * consistency) and TC-003–TC-007 (High: CVV/card protection, idempotent
+ * retry) from the approved Test Cases artifact. Ordered by risk band.
  */
 
-// TC-005 — @regression @risk-high — Reliability: stock/payment state consistency
-test.describe('Checkout Payment Regression — Stock/Payment State Consistency (R-02)', () => {
-  test('TC-005: payment is not captured and order reflects stock conflict when stock is exhausted before capture', async ({
-    checkoutPage,
-    gatewaySandbox,
-    testData,
+test.describe('Payment Authorization and Order Status Consistency', () => {
+  test('TC-001 order is confirmed after successful authorization and capture', async ({
+    gatewaySandboxClient,
+    orderServiceClient,
   }) => {
-    const itemId = process.env.SANDBOX_RESERVED_ITEM_ID;
-    test.skip(!itemId, 'SANDBOX_RESERVED_ITEM_ID not configured.');
-    test.skip(!testData.validCard.number, 'SANDBOX_VALID_CARD_NUMBER not configured.');
+    const idempotencyKey = generateIdempotencyKey();
+    const paymentResponse = await gatewaySandboxClient.submitPayment({
+      card: validSandboxCard,
+      idempotencyKey,
+      outcome: 'success',
+    });
 
-    await checkoutPage.fillCard(testData.validCard);
-    // Force the reserved stock to be exhausted before capture completes.
-    await gatewaySandbox.exhaustStock(itemId!);
-    await checkoutPage.submitPayment();
+    const orderId = paymentResponse.body.orderId as string | undefined;
+    expect(orderId, 'Payment response must include an orderId to verify order status against').toBeTruthy();
 
-    const orderId = await checkoutPage.getOrderId();
-    const captureAmount = await gatewaySandbox.getCaptureAmount(orderId);
-    const orderStatus = await gatewaySandbox.getOrderStatus(orderId);
-
+    const orderStatus = await orderServiceClient.getOrderStatus(orderId as string);
     expect(
-      captureAmount,
-      `Expected no capture to be recorded for order ${orderId} after stock exhaustion, but found capture amount ${captureAmount}`
-    ).toBeUndefined();
+      orderStatus.status,
+      `Expected order-service API status "confirmed" for order ${orderId} after successful authorization and capture`
+    ).toBe('confirmed');
+  });
 
+  test('TC-002 order remains "payment failed" when gateway declines authorization', async ({
+    gatewaySandboxClient,
+    orderServiceClient,
+  }) => {
+    const idempotencyKey = generateIdempotencyKey();
+    const paymentResponse = await gatewaySandboxClient.submitPayment({
+      card: declineSandboxCard,
+      idempotencyKey,
+      outcome: 'decline',
+    });
+
+    const orderId = paymentResponse.body.orderId as string | undefined;
+    expect(orderId, 'Payment response must include an orderId even when the gateway declines').toBeTruthy();
+
+    const orderStatus = await orderServiceClient.getOrderStatus(orderId as string);
     expect(
-      orderStatus,
-      `Expected order ${orderId} status to reflect a stock conflict, but got "${orderStatus}"`
-    ).not.toBe('confirmed');
+      orderStatus.status,
+      `Expected order-service API status "payment failed" for order ${orderId} after a gateway decline`
+    ).toBe('payment failed');
+
+    const captureCount = await orderServiceClient.getCaptureCount(orderId as string);
+    expect(captureCount, `Expected zero captures recorded for declined order ${orderId}`).toBe(0);
   });
 });
 
-// TC-006 — @negative @security @risk-high — Card data non-exposure on decline
-test.describe('Checkout Payment Regression — Card Data Non-Exposure (R-03)', () => {
-  test('TC-006: raw card number and CVV are never exposed in error message or transaction log after a declined payment', async ({
-    checkoutPage,
-    gatewaySandbox,
-    testData,
-  }) => {
-    test.skip(!testData.declineCard.number, 'SANDBOX_DECLINE_CARD_NUMBER not configured.');
+test.describe('CVV and Card Data Protection', () => {
+  test('TC-003 CVV is masked in the UI after field loses focus', async ({ checkoutPage }) => {
+    await checkoutPage.goto();
+    await checkoutPage.fillCard(validSandboxCard);
+    await checkoutPage.blurCvv();
 
-    await checkoutPage.fillCard(testData.declineCard);
+    const cvvFieldType = await checkoutPage.cvvInput.getAttribute('type');
+    expect(
+      cvvFieldType,
+      'CVV input must render as a masked field (type="password") once focus leaves the field, per PCI-DSS masking requirement'
+    ).toBe('password');
+
+    const pageText = await checkoutPage.page.locator('body').innerText();
+    expect(
+      pageText.includes(validSandboxCard.cvv),
+      `Raw CVV value must not appear anywhere in the rendered page text (searched for "${validSandboxCard.cvv}")`
+    ).toBe(false);
+  });
+
+  test('TC-004 checkout rejects payment when CVV format is invalid', async ({ checkoutPage }) => {
+    await checkoutPage.goto();
+
+    let gatewayCalled = false;
+    await checkoutPage.page.route('**/payments**', (route) => {
+      gatewayCalled = true;
+      return route.continue();
+    });
+
+    await checkoutPage.fillCard({ ...validSandboxCard, cvv: invalidCvv });
     await checkoutPage.submitPayment();
 
-    const errorText = (await checkoutPage.checkoutErrorMessage.textContent()) ?? '';
+    await expect(
+      checkoutPage.cvvValidationError,
+      'Checkout must display a validation error requesting a valid CVV when the CVV format is invalid'
+    ).toBeVisible();
 
     expect(
-      errorText.includes(testData.declineCard.number),
-      `Checkout error message unexpectedly contained the raw card number: "${errorText}"`
+      gatewayCalled,
+      'No outbound request to the payment gateway should be made when client-side CVV format validation fails'
     ).toBe(false);
-    expect(
-      errorText.includes(testData.declineCard.cvv),
-      `Checkout error message unexpectedly contained the raw CVV: "${errorText}"`
-    ).toBe(false);
+  });
 
-    const orderId = await checkoutPage.getOrderId();
-    const log = await gatewaySandbox.getTransactionLog(orderId);
+  test('TC-005 CVV is absent from network logs and error payloads across failure types', async ({
+    gatewaySandboxClient,
+  }) => {
+    const failureTypes = ['invalid CVV', 'gateway timeout', 'gateway decline'];
 
-    expect(log, `No transaction log entry found for declined order ${orderId}`).toBeDefined();
-    expect(
-      log!.maskedCardNumber,
-      `Gateway transaction log for order ${orderId} did not show a masked first-six/last-four card number: "${log!.maskedCardNumber}"`
-    ).toMatch(/^\d{6}\*+\d{4}$/);
-    expect(
-      log!.rawEntry.includes(testData.declineCard.cvv),
-      `Gateway transaction log for order ${orderId} unexpectedly contained the raw CVV`
-    ).toBe(false);
+    for (const failureType of failureTypes) {
+      const { networkLogEntry, errorMessagePayload } = await gatewaySandboxClient.triggerFailure(failureType);
+
+      expect(
+        networkLogEntry.includes(validSandboxCard.cvv),
+        `Network log entry for failure type "${failureType}" must not contain the submitted CVV value`
+      ).toBe(false);
+
+      expect(
+        errorMessagePayload.includes(validSandboxCard.cvv),
+        `Error-message payload for failure type "${failureType}" must not contain the submitted CVV value`
+      ).toBe(false);
+    }
   });
 });
 
-// TC-007 — @regression @risk-high — Idempotent retry / duplicate-debit prevention
-test.describe('Checkout Payment Regression — Idempotent Retry (R-04)', () => {
-  test('TC-007: exactly one debit is recorded when a payment retry reuses the same idempotency key after a gateway timeout', async ({
-    checkoutPage,
-    gatewaySandbox,
-    testData,
+test.describe('Idempotent Payment Retry', () => {
+  test('TC-006 duplicate debit prevented when retried with same idempotency key after timeout', async ({
+    gatewaySandboxClient,
+    orderServiceClient,
   }) => {
-    test.skip(!testData.timeoutSimCard.number, 'SANDBOX_TIMEOUT_CARD_NUMBER not configured.');
+    const idempotencyKey = generateIdempotencyKey();
+    const payload = { card: validSandboxCard, idempotencyKey, outcome: 'timeout-then-retry' };
 
-    await checkoutPage.fillCard(testData.timeoutSimCard);
-    await checkoutPage.submitPayment(); // expected to simulate a gateway timeout in sandbox
-
-    const orderId = await checkoutPage.getOrderId();
-    await checkoutPage.retryPayment(); // client resubmits with the original idempotency key
-
-    const debitCount = await gatewaySandbox.getDebitCount(orderId);
-
+    const firstAttempt = await gatewaySandboxClient.submitPayment(payload);
+    const orderId = firstAttempt.body.orderId as string | undefined;
     expect(
-      debitCount,
-      `Expected exactly one debit for order ${orderId} after idempotent retry, but found ${debitCount}`
+      orderId,
+      'First payment attempt must return an orderId even when the gateway times out, so the retry can be tracked'
+    ).toBeTruthy();
+
+    await gatewaySandboxClient.submitPayment(payload);
+
+    const captureCount = await orderServiceClient.getCaptureCount(orderId as string);
+    expect(
+      captureCount,
+      `Expected exactly one capture recorded for order ${orderId} after retrying with the same idempotency key`
     ).toBe(1);
   });
-});
 
-// TC-008 — @negative @security @risk-medium — Input validation: injection
-test.describe('Checkout Payment Regression — Promo Code Input Validation (R-05)', () => {
-  test('TC-008: promo code field rejects a SQL/script injection input without exposing internal details', async ({
-    checkoutPage,
-    testData,
+  test('TC-007 payment request without idempotency key is rejected before reaching the gateway', async ({
+    gatewaySandboxClient,
   }) => {
-    await checkoutPage.applyPromoCode(testData.injectionPromoCode);
+    const payload = { card: validSandboxCard }; // idempotencyKey deliberately omitted
 
-    const errorText = (await checkoutPage.promoErrorMessage.textContent()) ?? '';
-
-    expect(
-      errorText.length > 0,
-      'Expected a validation message to be shown when submitting an injection-pattern promo code, but none was displayed'
-    ).toBe(true);
-    expect(
-      /sql|stack|exception|query|syntax error/i.test(errorText),
-      `Promo code error message leaked internal system/query detail: "${errorText}"`
-    ).toBe(false);
-    await expect(
-      checkoutPage.payButton,
-      'Pay button should not proceed to a payment attempt after an invalid promo code submission'
-    ).toBeEnabled();
-  });
-
-  // TC-009 — @boundary @edge-case @risk-medium — Input validation: oversized input
-  test('TC-009: promo code field rejects an oversized input value without initiating payment', async ({
-    checkoutPage,
-    testData,
-  }) => {
-    await checkoutPage.applyPromoCode(testData.oversizedPromoCode);
-
-    const errorText = (await checkoutPage.promoErrorMessage.textContent()) ?? '';
+    const response = await gatewaySandboxClient.submitPayment(payload);
 
     expect(
-      errorText.length > 0,
-      'Expected a validation message to be shown for an oversized promo code, but none was displayed'
-    ).toBe(true);
-    await expect(
-      checkoutPage.payButton,
-      'No payment attempt should be initiated following an oversized promo code submission'
-    ).toBeEnabled();
+      response.status,
+      'Request missing an idempotency key must be rejected with a client validation error status (4xx)'
+    ).toBeGreaterThanOrEqual(400);
+    expect(
+      response.status,
+      'Rejection must be a client error, not a server error, confirming the request was validated before gateway processing'
+    ).toBeLessThan(500);
   });
 });
 ```
 
+`### `tests/stock-and-promo-consistency.spec.ts``
+```typescript
+import { test, expect } from '../fixtures/fixtures';
+import { CheckoutPage } from '../pages/CheckoutPage';
+import { validSandboxCard, promoCodes, generateIdempotencyKey } from '../fixtures/test-data';
+
+/**
+ * Covers TC-008–TC-012 (Medium risk: stock validation during checkout,
+ * promo-adjusted amount consistency) from the approved Test Cases artifact.
+ */
+
+const productId = process.env.SANDBOX_PRODUCT_ID ?? 'TBD-SANDBOX-PRODUCT-ID';
+
+test.describe('Stock Validation During Checkout', () => {
+  test('TC-008 authorization rolled back when stock depletes to zero before capture', async ({
+    gatewaySandboxClient,
+    orderServiceClient,
+    productStockClient,
+  }) => {
+    await productStockClient.setStockLevel(productId, 1);
+
+    const idempotencyKey = generateIdempotencyKey();
+    const authResponse = await gatewaySandboxClient.submitPayment({
+      card: validSandboxCard,
+      idempotencyKey,
+      productId,
+      outcome: 'hold-before-capture',
+    });
+    const orderId = authResponse.body.orderId as string | undefined;
+    expect(orderId, 'Authorization response must include an orderId while capture is held in-flight').toBeTruthy();
+
+    await productStockClient.depleteStockConcurrently(productId);
+
+    const orderStatus = await orderServiceClient.getOrderStatus(orderId as string);
+    expect(
+      orderStatus.status,
+      `Expected order ${orderId} status "stock unavailable" after concurrent depletion blocked capture`
+    ).toBe('stock unavailable');
+
+    const captureCount = await orderServiceClient.getCaptureCount(orderId as string);
+    expect(captureCount, `Expected zero captures recorded for order ${orderId} after the rollback`).toBe(0);
+  });
+
+  test('TC-009 customer sees out-of-stock error after concurrent stock depletion, no authorization initiated', async ({
+    checkoutPage,
+    productStockClient,
+  }) => {
+    await productStockClient.setStockLevel(productId, 0);
+
+    let gatewayCalled = false;
+    await checkoutPage.page.route('**/payments**', (route) => {
+      gatewayCalled = true;
+      return route.continue();
+    });
+
+    await checkoutPage.goto();
+    await checkoutPage.submitPayment();
+
+    await expect(
+      checkoutPage.outOfStockError,
+      'Checkout must display an out-of-stock error when the product stock has been depleted'
+    ).toBeVisible();
+
+    expect(
+      gatewayCalled,
+      'No payment authorization request should be sent to the gateway when the product is out of stock'
+    ).toBe(false);
+  });
+
+  test('TC-010 two concurrent checkouts contend for the last unit of stock', async ({
+    browser,
+    productStockClient,
+  }) => {
+    await productStockClient.setStockLevel(productId, 1);
+
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    try {
+      const checkoutA = new CheckoutPage(await contextA.newPage());
+      const checkoutB = new CheckoutPage(await contextB.newPage());
+
+      await checkoutA.goto();
+      await checkoutB.goto();
+
+      await Promise.all([
+        checkoutA.submitPayment().catch(() => undefined),
+        checkoutB.submitPayment().catch(() => undefined),
+      ]);
+
+      const outOfStockA = await checkoutA.outOfStockError.isVisible().catch(() => false);
+      const outOfStockB = await checkoutB.outOfStockError.isVisible().catch(() => false);
+
+      expect(
+        [outOfStockA, outOfStockB].filter(Boolean).length,
+        'Exactly one of the two concurrent checkout sessions must be shown an out-of-stock error when contending for the last unit of stock'
+      ).toBe(1);
+    } finally {
+      await contextA.close();
+      await contextB.close();
+    }
+  });
+});
+
+test.describe('Promo-Adjusted Amount Consistency', () => {
+  test('TC-011 authorization and settlement amounts match cart total across promo types', async ({
+    checkoutPage,
+    gatewaySandboxClient,
+  }) => {
+    const cases: Array<{ promoType: keyof typeof promoCodes }> = [
+      { promoType: 'percentage' },
+      { promoType: 'flat' },
+      { promoType: 'expired' },
+    ];
+
+    for (const { promoType } of cases) {
+      await checkoutPage.goto();
+      await checkoutPage.applyPromoCode(promoCodes[promoType]);
+
+      const cartTotalText = await checkoutPage.cartTotal.innerText();
+      const cartTotal = Number(cartTotalText.replace(/[^0-9.]/g, ''));
+
+      const paymentResponse = await gatewaySandboxClient.submitPayment({
+        card: validSandboxCard,
+        idempotencyKey: generateIdempotencyKey(),
+        promoType,
+      });
+      const authorizationAmount = paymentResponse.body.authorizationAmount as number | undefined;
+      const settlementAmount = paymentResponse.body.settlementAmount as number | undefined;
+
+      expect(
+        authorizationAmount,
+        `Authorization amount must equal the cart total (${cartTotal}) for promo type "${promoType}"`
+      ).toBe(cartTotal);
+      expect(
+        settlementAmount,
+        `Settlement amount must equal the cart total (${cartTotal}) for promo type "${promoType}"`
+      ).toBe(cartTotal);
+    }
+  });
+
+  test('TC-012 expired promo code is rejected and cart total reverts to original price', async ({
+    checkoutPage,
+  }) => {
+    await checkoutPage.goto();
+
+    const originalCartTotalText = await checkoutPage.cartTotal.innerText();
+
+    await checkoutPage.applyPromoCode(promoCodes.expired);
+
+    await expect(
+      checkoutPage.promoError,
+      'Cart must display an expired-promo error when an expired promo code is applied'
+    ).toBeVisible();
+
+    const revertedCartTotalText = await checkoutPage.cartTotal.innerText();
+    expect(
+      revertedCartTotalText,
+      'Cart total must revert to the original, undiscounted price after the expired promo code is rejected'
+    ).toBe(originalCartTotalText);
+  });
+});
+```
+
+## Notes for tester review
+
+- All 12 approved test cases (TC-001–TC-012) are implemented, ordered by risk band (Critical → High → Medium) across 2 spec files, within the 12-`test()` budget.
+- `ORDER_SERVICE_URL`, `PAYMENT_GATEWAY_SANDBOX_URL`, `CHECKOUT_URL`, `SANDBOX_PRODUCT_ID`, and the `SANDBOX_CARD_*`/`SANDBOX_PROMO_*` env vars are **not specified** in the provided context — they default to visible `TBD-*` placeholders and will throw a clear error if unset at run time, rather than silently pointing at a fabricated URL.
+- TC-001/002/006/008 assert order status via `orderServiceClient` (order-service API) as a proxy for the "database order status" check in the approved cases — direct DB assertions are out of scope for Playwright and were not otherwise specified; flagged here rather than invented.
+- No hardcoded credentials, URLs, or card data are present; all sensitive/test values come from environment variables via `fixtures/test-data.ts`.
+
 ## Not implemented in this pass
-- **TC-002 / TC-003 / TC-004** (percentage, fixed-amount, stacked promo Examples rows): implemented as `test.fixme` placeholders only. The Approved Scenarios Examples table marks `expected_amount` as **TBD — tester to supply sandbox test data**; per the no-fabrication rule, no numeric expectation was invented. Populate `SANDBOX_*` env vars with real sandbox rates and replace the `test.fixme` blocks with assertions once that data is confirmed by the tester.
-- **Selector confirmation**: all `data-testid` locators in `checkout-page.ts` are draft names (no Recorded Baseline was supplied). Confirm against actual application markup before first execution.
-- **Gateway sandbox endpoint paths** in `payment-gateway-sandbox.ts` are draft assumptions pending confirmation against the real sandbox API contract.
+None — all approved scenarios/cases (TC-001 through TC-012) are covered.

@@ -1,26 +1,42 @@
 /**
- * Fixture-based test data. No credentials or endpoints are hardcoded — all
- * sandbox values are sourced from environment variables so the suite never
- * embeds real or plausible-looking card data in source control.
- *
- * Open item (carried from Test Basis, owner TBD): sandbox/test bank credential
- * and promo code availability for execution is not yet confirmed.
+ * Fixture-based test data for Checkout Payment Regression automation.
+ * All sandbox identifiers are sourced from environment variables — no real
+ * card data or credentials are hardcoded here. Where an env var is not
+ * configured, a clearly-marked TBD placeholder is used so failures are
+ * traceable to missing configuration rather than a silent wrong value.
  */
-export const testData = {
-  sandboxCard: {
-    number: process.env.SANDBOX_CARD_NUMBER,
-    expiry: process.env.SANDBOX_CARD_EXPIRY,
-    cvv: process.env.SANDBOX_CARD_CVV,
-  },
-  promoCodes: {
-    active: process.env.PROMO_CODE_ACTIVE,
-    expired: process.env.PROMO_CODE_EXPIRED,
-    secondValid: process.env.PROMO_CODE_SECOND_VALID,
-    // Synthetic literal for a negative-path lookup — not a credential, not app data.
-    nonExistent: 'QA-NONEXISTENT-CODE-0001',
-  },
-  // TBD in Test Basis: "Exact maximum accepted length for promo code field — not specified".
-  maxPromoCodeLength: process.env.PROMO_CODE_MAX_LENGTH
-    ? Number(process.env.PROMO_CODE_MAX_LENGTH)
-    : undefined,
+
+export interface CardFixture {
+  cardNumber: string;
+  expiry: string;
+  cvv: string;
+}
+
+export const validSandboxCard: CardFixture = {
+  cardNumber: process.env.SANDBOX_CARD_VALID_NUMBER ?? 'TBD-SANDBOX-VALID-CARD-NUMBER',
+  expiry: process.env.SANDBOX_CARD_VALID_EXPIRY ?? 'TBD-SANDBOX-VALID-EXPIRY',
+  cvv: process.env.SANDBOX_CARD_VALID_CVV ?? 'TBD-SANDBOX-VALID-CVV',
 };
+
+export const declineSandboxCard: CardFixture = {
+  cardNumber: process.env.SANDBOX_CARD_DECLINE_NUMBER ?? 'TBD-SANDBOX-DECLINE-CARD-NUMBER',
+  expiry: process.env.SANDBOX_CARD_DECLINE_EXPIRY ?? 'TBD-SANDBOX-DECLINE-EXPIRY',
+  cvv: process.env.SANDBOX_CARD_DECLINE_CVV ?? 'TBD-SANDBOX-DECLINE-CVV',
+};
+
+// Deliberately malformed (2-digit) CVV for negative-path validation testing.
+export const invalidCvv = process.env.SANDBOX_CVV_INVALID_FORMAT ?? '9X';
+
+export const promoCodes = {
+  percentage: process.env.SANDBOX_PROMO_PERCENTAGE ?? 'TBD-PROMO-PERCENTAGE',
+  flat: process.env.SANDBOX_PROMO_FLAT ?? 'TBD-PROMO-FLAT',
+  expired: process.env.SANDBOX_PROMO_EXPIRED ?? 'TBD-PROMO-EXPIRED',
+} as const;
+
+/**
+ * Generates a unique idempotency key per test invocation so tests remain
+ * independent and never share mutable retry state across runs.
+ */
+export function generateIdempotencyKey(): string {
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
