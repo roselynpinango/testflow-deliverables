@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-Test basis covers checkout with card payment, promo code application, and stock validation at point of purchase. This spans payment gateway integration (functional suitability), promo/pricing calculation logic, and inventory concurrency checks. Not specified: which card networks, promo code types (percentage/flat/BOGO), or 3DS enforcement rules are in scope — flagged as open blockers below.
+Checkout regression scope covers three converging test conditions from the test basis: card payment processing, promo code application, and stock validation at point of purchase. Key risk centers on the interaction between these three flows — e.g., a promo code recalculating cart total after stock validation but before card authorization, creating a state mismatch. Not measured: current defect density or prior regression cycle results for this build.
 
 **Test risk level:** High
 
@@ -14,23 +14,22 @@ Test basis covers checkout with card payment, promo code application, and stock 
 
 | Area | Risk | Why it matters this sprint |
 |------|------|---------------------------|
-| Card payment authorization/capture | High | Functional suitability + security risk — incorrect authorization state or exposed card data (CVV/PAN) at checkout can cause duplicate debits or PCI-DSS violations (per domain defect pattern: "duplicate debits on retry") |
-| Promo code + cart total calculation | High | Functional suitability risk — mismatch between discounted cart total and actual bank debit amount is a known defect pattern; also a fraud vector if stacking/tampering isn't validated |
-| Stock validation at purchase | Medium | Functional suitability risk — order confirmed despite out-of-stock item (state mismatch between inventory and order system) directly maps to documented defect pattern |
-| Payment gateway ↔ order system integration | High | Technical/compatibility risk — state consistency across authorization → order confirmation → inventory decrement depends on correct webhook/callback handling |
-| Session & timeout handling at payment step | Medium | Reliability risk — network drop mid-transaction or expired session during card entry can cause duplicate charge or abandoned-cart inconsistency |
-| Input validation on promo code field | Medium | Security risk — promo code field is a candidate for injection/oversized-input testing; unvalidated input could affect pricing logic |
+| Card payment authorization & capture (Functional Suitability) | High | Amount charged must match final cart total after promo/stock adjustments; mismatch is a known defect pattern in this domain (currency/amount mismatch between cart and bank debit) |
+| Promo code application logic (Functional Suitability) | Medium | Discount recalculation timing relative to stock check and payment authorization is untested territory this basis introduces; risk of stale/incorrect total reaching gateway |
+| Stock validation at point of purchase (Functional Suitability) | High | Race condition risk — item goes out of stock between cart display and payment capture; order/inventory state consistency not confirmed |
+| Payment gateway integration (Compatibility) | High | Card payment routes through an intermediary payment gateway; any change to checkout flow risks breaking the integration contract (request/response schema, callback handling) |
+| Order/payment state consistency (Reliability) | High | Known defect pattern: order confirmed despite payment failure, or payment captured despite stock-out — state mismatch between gateway, inventory, and order system |
+| Input validation & data exposure on checkout form (Security) | High | Promo code field and payment form are injection/tampering surfaces; card data and CVV must never appear in logs, URLs, or error responses per PCI-DSS |
 
 ---
 
 ## Out of Scope This Cycle
 
-- Net banking, UPI, wallet, and BNPL payment methods (test basis names card payment only)
-- Refund/chargeback flow validation (basis is point-of-purchase checkout, not post-transaction reversal)
-- Saved card/tokenized instrument management (not referenced in this test basis)
-- Performance/load/stress testing of checkout under concurrent traffic (explicitly out of discipline scope; flagged as a performance efficiency **risk** only, not tested here)
-- Cross-currency conversion display (not mentioned in test basis)
-- Unit-level validation of pricing/discount algorithms (out of scope for this test level)
+- Performance/load/stress testing of checkout under concurrent traffic (flagged as a Performance Efficiency risk, not tested here — see Test Approach Decision)
+- Unit-level validation of promo code discount calculation logic (developer-owned, out of software-testing scope per discipline boundary)
+- BNPL, wallet top-up, and net banking payment methods (not part of this test basis; card payment only)
+- Refund/chargeback flow testing (test basis limited to point-of-purchase checkout, not post-purchase reversal)
+- Multi-currency conversion display (not mentioned in test basis; TBD whether this checkout supports multiple currencies)
 
 ---
 
@@ -38,11 +37,11 @@ Test basis covers checkout with card payment, promo code application, and stock 
 
 | Test Type | Decision | Rationale |
 |-----------|----------|-----------|
-| Functional | Yes | Test basis explicitly defines three functional flows (card payment, promo codes, stock validation) requiring test conditions for each state transition and business rule |
-| Regression | Yes | Checkout is a shared critical path; changes to promo/stock logic risk regressing existing card payment authorization flows (defect clustering principle applies) |
-| Integration | Yes | Payment gateway, promo engine, and inventory service must be checked for state consistency at their boundaries — a top domain defect pattern (order confirmed despite payment/stock failure) |
-| Performance | No | Out of discipline scope per charter; performance efficiency noted as a risk in Impact Radar only, not designed as a test type here |
-| Security | Yes | Regulated industry mandate — card data handling (CVV masking, PCI-DSS non-exposure) and promo code input validation are non-negotiable given zero-security-scenario gate failure condition |
+| Functional | Yes | Test basis explicitly names three functional flows (card payment, promo codes, stock validation) that must each be verified independently and in combination per ISTQB test condition derivation |
+| Regression | Yes | This is a checkout payment regression cycle; prior passing checkout paths must be re-verified against pesticide paradox — new promo/stock interaction paths are the primary regression risk |
+| Integration | Yes | Card payment depends on payment gateway integration and inventory system integration; these boundaries are named defect clustering zones per domain expertise (state mismatch between gateway and order system) |
+| Performance | No | Out of scope per discipline boundary; load/stress/timing behavior under concurrency is a Performance Efficiency risk to flag, not a test type to design here |
+| Security | Yes | Regulated industry mandate — PCI-DSS requires CVV/card data non-exposure; promo code and payment fields are input validation surfaces requiring injection/tampering coverage per security elevation policy |
 
 ---
 
@@ -50,18 +49,17 @@ Test basis covers checkout with card payment, promo code application, and stock 
 
 | Blocker | Owner | Needed by |
 |---------|-------|-----------|
-| Confirm which card networks/issuers are in scope for this cycle | TBD | TBD |
-| Confirm promo code types (flat/percentage/stacking rules) supported | TBD | TBD |
-| Confirm whether 3D Secure/OTP step is included in this checkout flow or deferred | TBD | TBD |
-| Confirm stock validation timing (reserved at cart-add vs. at payment submission) | TBD | TBD |
+| Confirm whether promo code discount is applied before or after stock validation in the checkout sequence | TBD (not specified in test basis) | TBD |
+| Confirm test/sandbox payment gateway credentials and environment availability for this cycle | TBD (not specified) | TBD |
+| Clarify whether concurrent-buyer stock race condition is in scope for this regression cycle or deferred | TBD (not specified) | TBD |
 
 ---
 
 ## Top 3 Test Focus Areas
 
-1. Card payment authorization vs. order/inventory state consistency — highest-risk defect pattern (order confirmed despite payment or stock failure) directly named in domain expertise
-2. Promo code application accuracy against final bank-debited amount — currency/amount mismatch is a documented defect pattern with compliance implications
-3. Security coverage for card data exposure and promo code input validation — regulated-industry gate requires explicit security scenarios; CVV/PAN must never appear in logs, URLs, or error messages
+1. **Cart total integrity across promo + stock + payment sequence** — the highest-risk interaction point named in the test basis; a discrepancy here directly causes the domain's known "amount mismatch" defect pattern.
+2. **Order/inventory/payment state consistency at point of purchase** — addresses the known defect pattern of order confirmed despite payment failure or stock-out, a Reliability characteristic risk.
+3. **Input validation and data exposure on promo code and card payment fields** — mandatory security elevation for this regulated industry; zero security coverage would fail the quality gate.
 
 ---
 
